@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Extract biographies from BiographieNationale_Volume1.pdf
-Each biography is saved as a separate UTF-8 .txt file in biographies_finales/
+
+Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
+to reliably segment biographies. Page headers are filtered by Y-position.
 """
 
 import fitz  # PyMuPDF
@@ -13,252 +15,376 @@ PDF_PATH = "BiographieNationale_Volume1.pdf"
 OUTPUT_DIR = "biographies_finales"
 LOG_FILE = "rapport_final.log"
 
-# Page where actual biographies begin (0-indexed). Page 42 in 1-based = index 41
+# Page where actual biographies begin (0-indexed page 41 = PDF page 42)
 BIO_START_PAGE = 41
+# Last page with biographies (0-indexed; page 470 has ERRATA)
+BIO_END_PAGE = 469
 
-# Uppercase letter class including accented characters
+# Y threshold: anything above this in the page is a running header
+HEADER_Y_THRESHOLD = 60.0
+
 UC = r'A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞ'
 
 
-def clean_page_text(page_num, text):
-    """Remove headers, footers, page numbers from a single page's text."""
-    lines = text.split('\n')
-    cleaned = []
-    non_empty_seen = 0
+# ─────────────────────────────────────────────
+# STEP 1: Extract structured data per page
+# ─────────────────────────────────────────────
 
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
+def extract_page_data(page, page_idx):
+    """Extract text spans with metadata from a page.
 
-        # Skip empty lines at very start
-        if non_empty_seen < 4 and not stripped:
-            continue
-
-        if stripped:
-            non_empty_seen += 1
-
-        # Skip standalone page numbers (just digits)
-        if re.match(r'^\d{1,4}\s*$', stripped):
-            continue
-
-        # Skip column headers in the first few non-empty lines
-        # These are ALL CAPS navigation headers like "ABEL — ABOLIN", "AGURTO"
-        if non_empty_seen <= 4:
-            if re.match(rf'^[{UC}\s\-—–.*\'()]+$', stripped):
-                if len(stripped) < 80 and ',' not in stripped and 'né' not in stripped.lower():
-                    continue
-
-        # Skip "BIOGR. NAT. — T. I." type footers
-        if re.match(r'^BIOC?R?\.\s*NAT\.\s*[-—–]\s*T\.\s*[IVX]+', stripped):
-            continue
-
-        # Skip "BIOGRAPHIE NATIONALE." header
-        if stripped == "BIOGRAPHIE NATIONALE.":
-            continue
-
-        cleaned.append(line)
-
-    return '\n'.join(cleaned)
-
-
-def collapse_spaced_names(text):
-    """Collapse spaced-out uppercase letters like 'A B B É' -> 'ABBÉ'.
-
-    The PDF sometimes renders names with spaces between letters.
-    We detect patterns of single uppercase letters separated by spaces
-    at the start of a line (biography header position).
+    Returns a list of line dicts with: y, x, spans[], full_text, has_bold_start.
+    Filters out the running header zone (y < HEADER_Y_THRESHOLD).
     """
-    def collapse_spaced(m):
-        full = m.group(0)
-        prefix = m.group(1) or ''
-        # The spaced part starts after the prefix
-        spaced = full[len(prefix):]
-        collapsed = re.sub(r'(?<=\w) (?=\w)', '', spaced)
-        return prefix + collapsed
+    lines_data = []
+    blocks = page.get_text('dict')['blocks']
 
-    # Pattern: line starts with single uppercase letters separated by spaces
-    # e.g., "A B B É (Henri)" or "A D E L H A I R E,"
-    # May be preceded by optional "* " for foreign entries
-    # At least 3 spaced single chars to avoid false positives
-    text = re.sub(
-        rf'^(\*\s*)?([{UC}] ){{2,}}[{UC}][{UC}]*',
-        collapse_spaced,
-        text,
-        flags=re.MULTILINE
-    )
-    return text
+    for b in blocks:
+        if 'lines' not in b:
+            continue
+        for line in b['lines']:
+            y_top = line['bbox'][1]
+            x_left = line['bbox'][0]
+
+            # SKIP running headers at top of page
+            if y_top < HEADER_Y_THRESHOLD:
+                continue
+
+            spans = []
+            for s in line['spans']:
+                text = s['text']
+                if not text.strip():
+                    continue
+                is_bold = bool(s['flags'] & (1 << 4))
+                is_italic = bool(s['flags'] & (1 << 1))
+                size = s['size']
+                font = s['font']
+                spans.append({
+                    'text': text,
+                    'bold': is_bold,
+                    'italic': is_italic,
+                    'size': size,
+                    'font': font,
+                })
+
+            if not spans:
+                continue
+
+            full_text = ''.join(s['text'] for s in spans).strip()
+
+            # Check if line starts with bold text
+            has_bold_start = spans[0]['bold'] if spans else False
+
+            lines_data.append({
+                'y': y_top,
+                'x': x_left,
+                'spans': spans,
+                'full_text': full_text,
+                'has_bold_start': has_bold_start,
+                'page': page_idx,
+            })
+
+    return lines_data
 
 
-def merge_pages(pages):
-    """Merge all cleaned page texts into one continuous stream."""
-    cleaned_texts = []
-    for page_num, text in pages:
-        cleaned = clean_page_text(page_num, text)
-        if cleaned.strip():
-            cleaned_texts.append(cleaned)
-    return '\n'.join(cleaned_texts)
+# ─────────────────────────────────────────────
+# STEP 2: Identify biography start positions
+# ─────────────────────────────────────────────
+
+def is_biography_start(line_data, next_line_data=None):
+    """Detect if a line is the start of a new biography entry.
+
+    A biography starts with a name that is:
+    - In bold font (Times-Bold), OR
+    - In spaced small-caps (smaller font size, uppercase with spaces)
+    - In regular font but clearly an uppercase name pattern
+
+    Followed by (Prénom) or , descriptor (possibly on the next line)
+
+    Must NOT be:
+    - A footnote (bold at small size < 7.0 at bottom of page)
+    - An author signature (mixed case like "P. F. X. de Ram.")
+    - A bibliography reference
+    """
+    spans = line_data['spans']
+    full = line_data['full_text']
+    y = line_data['y']
+
+    if not spans or not full:
+        return False
+
+    first = spans[0]
+
+    # ── Method 1: Bold start ──
+    if first['bold'] and first['size'] >= 7.0:
+        # Collect bold name part
+        bold_parts = []
+        for s in spans:
+            if s['bold']:
+                bold_parts.append(s['text'])
+            else:
+                break
+        bold_name = ''.join(bold_parts).strip()
+
+        # Must be mostly uppercase
+        name_clean = re.sub(r'[\s\-\'\.,;:\(\)\*\"I]', '', bold_name)
+        if not name_clean:
+            return False
+        upper_count = sum(1 for c in name_clean if c.isupper())
+        if len(name_clean) > 0 and upper_count / len(name_clean) >= 0.6:
+            # Must have at least 3 uppercase chars
+            if upper_count >= 3:
+                # Must be followed by ( or , or "ou" (biography descriptor)
+                # If bold_name ends with "(", consider that as having ( already
+                rest = full[len(bold_name):].strip()
+                if bold_name.rstrip().endswith('('):
+                    rest = '(' + rest
+                if (rest.startswith('(') or rest.startswith(',') or
+                    re.match(r'^ou\s', rest, re.IGNORECASE) or
+                    bold_name.rstrip().endswith(',') or bold_name.rstrip().endswith('(')):
+                    # Filter out footnotes at bottom of page (y > 520 and size < 7.5)
+                    if y > 520 and first['size'] < 7.0:
+                        return False
+                    # Filter author signatures: "P. F. X. de Ram." pattern
+                    if re.match(r'^[A-Z]\.\s*[A-Z]', bold_name):
+                        return False
+                    return True
+
+    # ── Method 2: Spaced small-caps (non-bold) ──
+    # Names like "A B B É (Henri)" or "* A B E L (Saint)" rendered in smaller font with spaces
+    first_text = first['text'].strip()
+    # Remove leading * for foreign entries
+    check_text = re.sub(r'^\*\s*', '', first_text)
+    if re.match(rf'^[{UC}]( [{UC}]){{2,}}', check_text):
+        # Spaced uppercase letters - this is a biography name
+        rest = full[len(first_text):].strip()
+        if (rest.startswith('(') or rest.startswith(',') or
+            re.match(r'^ou\s', rest, re.IGNORECASE)):
+            return True
+
+    # ── Method 3: Regular uppercase name (non-bold, non-spaced) ──
+    # Some entries like AGURTO are in regular font but clearly biography starts
+    # They are uppercase names followed by (Prénom) or , descriptor
+    # Handle * prefix for foreign entries
+
+    # Find first meaningful span (skip * and spaces)
+    first_real_idx = 0
+    for idx, s in enumerate(spans):
+        if s['text'].strip() in ('*', ''):
+            first_real_idx = idx + 1
+        else:
+            break
+
+    if first_real_idx < len(spans):
+        real_first = spans[first_real_idx]
+        ft = real_first['text'].strip()
+        # Handle "* NAME" or "NAME (" in a single span
+        ft_clean = re.sub(r'^\*\s*', '', ft)
+        # Strip trailing ( for "NAME (" pattern
+        ft_name = re.sub(r'\s*\(\s*$', '', ft_clean).strip()
+
+        # Check if it's an uppercase name (at least 3 chars)
+        if re.match(rf'^[{UC}][{UC}\-\' ]+$', ft_name) and len(ft_name) >= 3:
+            # Get what follows the name
+            name_end_pos = full.find(ft_name) + len(ft_name) if ft_name in full else -1
+            rest = full[name_end_pos:].strip() if name_end_pos >= 0 else ''
+
+            # Check next span for italic (first name) or ( or ,
+            if first_real_idx + 1 < len(spans):
+                next_span = spans[first_real_idx + 1]
+                next_text = next_span['text'].strip()
+                if (next_span['italic'] or
+                    next_text.startswith('(') or next_text.startswith(',') or
+                    rest.startswith('(') or rest.startswith(',')):
+                    return True
+
+            # Also check rest of full text for ( or , (with stripped space)
+            if rest.startswith('(') or rest.startswith(','):
+                return True
+
+    # ── Method 4: Single-span line with NAME (Prénom) pattern ──
+    # Sometimes the entire line is one span: "ADRIAENS (Henri), nommé aussi..."
+    if len(spans) == 1 and not first['bold']:
+        line_text = first['text'].strip()
+        # Remove leading * for foreign entries
+        check = re.sub(r'^\*\s*', '', line_text)
+        m = re.match(
+            rf'^([{UC}][{UC}\s\-\']+)\s*\(([^)]+)\)',
+            check
+        )
+        if m:
+            name_part = m.group(1).strip()
+            prenom = m.group(2).strip()
+            # Name must be at least 3 uppercase chars and the prénom should look like a name
+            if len(name_part) >= 3 and len(prenom) >= 2:
+                # Not a footnote reference like "(1)" or "(2)"
+                if not re.match(r'^\d+$', prenom):
+                    return True
+        # Also match single-span NAME, descriptor
+        m2 = re.match(
+            rf'^([{UC}][{UC}\s\-\']+),\s+[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþ]',
+            check
+        )
+        if m2:
+            name_part = m2.group(1).strip()
+            if len(name_part) >= 3:
+                return True
+
+    # ── Method 5: Name alone on a line, next line starts with ( or , ──
+    # In two-column layout, the name can be on one line, description on next
+    full_stripped = full.replace('*', '').strip()
+    if (re.match(rf'^[{UC}][{UC}\s\-\'\.]+$', full_stripped) and
+        len(full_stripped) >= 3 and len(full_stripped) <= 50):
+        if next_line_data:
+            next_full = next_line_data['full_text'].strip()
+            if next_full.startswith('(') or next_full.startswith(','):
+                return True
+            # Next line has (Prénom) pattern
+            if re.match(r'^\([^)]+\)', next_full):
+                return True
+
+    return False
 
 
-def dehyphenate(text):
-    """Fix words broken by hyphens at line endings."""
-    # word-\n lowercase continuation -> merge
+def collect_bio_starts(doc):
+    """Scan all biography pages and collect (page_idx, line_idx, line_data) for each start."""
+    all_lines = []  # (global_idx, page_idx, line_data)
+    global_idx = 0
+
+    for pidx in range(BIO_START_PAGE, BIO_END_PAGE):
+        page = doc[pidx]
+        page_lines = extract_page_data(page, pidx)
+        for ld in page_lines:
+            all_lines.append((global_idx, pidx, ld))
+            global_idx += 1
+
+    # Find biography starts
+    bio_starts = []
+    for i, (gidx, pidx, ld) in enumerate(all_lines):
+        next_ld = all_lines[i + 1][2] if i + 1 < len(all_lines) else None
+        if is_biography_start(ld, next_ld):
+            bio_starts.append((gidx, pidx, ld))
+
+    return all_lines, bio_starts
+
+
+# ─────────────────────────────────────────────
+# STEP 3: Extract text between biography starts
+# ─────────────────────────────────────────────
+
+def extract_bio_text(all_lines, start_gidx, end_gidx):
+    """Extract and clean the text between two global line indices."""
+    text_parts = []
+    for gidx, pidx, ld in all_lines:
+        if gidx < start_gidx:
+            continue
+        if gidx >= end_gidx:
+            break
+        text_parts.append(ld['full_text'])
+
+    raw = '\n'.join(text_parts)
+    return raw
+
+
+def clean_biography_text(text):
+    """Apply all cleaning steps to a biography's text."""
+    # Collapse spaced names
+    text = collapse_spaced_names(text)
+
+    # Dehyphenate
     text = re.sub(
         r'(\w)-\n(\w)',
         lambda m: m.group(1) + m.group(2) if m.group(2)[0].islower() else m.group(0),
         text
     )
-    return text
 
-
-def normalize_whitespace(text):
-    """Clean up whitespace while preserving paragraph structure."""
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    lines = [l.strip() for l in text.split('\n')]
-    return '\n'.join(lines)
-
-
-def join_broken_lines(text):
-    """Join lines broken by column formatting into continuous paragraphs."""
-    # Particles and short words that commonly continue a name on the next line
-    NAME_CONTINUATIONS = {'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
-                          'VANDER', 'VANDEN', 'VANDE', 'VER', 'TER', 'TEN', 'TE',
-                          'D', "D'", 'OU', 'ET'}
-
+    # Join broken lines (column wrapping)
     lines = text.split('\n')
     result = []
     i = 0
+    NAME_PARTICLES = {'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
+                      'VANDER', 'VANDEN', 'VANDE', 'VER', 'TER', 'TEN', 'TE',
+                      'D', "D'", 'OU', 'ET'}
+
     while i < len(lines):
         line = lines[i]
-        while i + 1 < len(lines) and lines[i + 1]:
-            next_line = lines[i + 1]
-            next_stripped = next_line.strip()
-            first_word = next_stripped.split(')')[0].split(',')[0].split('(')[0].strip() if next_stripped else ''
+        while i + 1 < len(lines) and lines[i + 1].strip():
+            next_s = lines[i + 1].strip()
+            first_word = next_s.split(')')[0].split(',')[0].split('(')[0].strip()
 
-            # Join if next line starts lowercase or with continuation punctuation
-            if (next_stripped[0].islower() or next_stripped[0] in '»«,;:)'):
-                # But not if it looks like a new biography (uppercase name pattern)
-                if not re.match(rf'^[{UC}]{{2,}}', next_stripped):
-                    line = line.rstrip() + ' ' + next_stripped
+            # Join lowercase continuation
+            if next_s[0].islower() or next_s[0] in '»«,;:)':
+                if not re.match(rf'^[{UC}]{{2,}}', next_s):
+                    line = line.rstrip() + ' ' + next_s
                     i += 1
                     continue
 
-            # Join if next line is a name particle continuation
-            # e.g., current line ends with "(" and next starts with "VAN)"
-            if first_word.rstrip(').,;:') in NAME_CONTINUATIONS:
-                # Check if current line has an unclosed parenthesis
+            # Join name particle continuation inside parens
+            if first_word.rstrip(').,;:') in NAME_PARTICLES:
                 if line.count('(') > line.count(')'):
-                    line = line.rstrip() + ' ' + next_stripped
+                    line = line.rstrip() + ' ' + next_s
                     i += 1
                     continue
 
-            # Join if next line starts with closing paren or is very short fragment
-            if next_stripped.startswith(')'):
-                line = line.rstrip() + ' ' + next_stripped
+            # Join closing paren
+            if next_s.startswith(')'):
+                line = line.rstrip() + ' ' + next_s
                 i += 1
                 continue
 
             break
         result.append(line)
         i += 1
-    return '\n'.join(result)
+
+    text = '\n'.join(result)
+
+    # Normalize whitespace
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    lines = [l.strip() for l in text.split('\n')]
+    text = '\n'.join(lines)
+
+    # Remove trailing empty lines
+    text = text.strip()
+
+    return text
 
 
-def segment_biographies(text):
-    """Split the full text into individual biographies using regex.
+def collapse_spaced_names(text):
+    """Collapse 'A B B É' -> 'ABBÉ'."""
+    def _collapse(m):
+        full = m.group(0)
+        prefix = m.group(1) or ''
+        spaced = full[len(prefix):]
+        collapsed = re.sub(r'(?<=\w) (?=\w)', '', spaced)
+        return prefix + collapsed
 
-    A biography starts with:
-    - UPPERCASE NAME (at least 2 uppercase letters, possibly with hyphens/apostrophes)
-    - Followed by ( with first name or , with description
-    - The name must be a proper noun (not random Latin/French text in caps)
-    """
-    # Two patterns:
-    # 1. NAME (Prénom...) — most common
-    # 2. NAME, descriptive text — less common but valid (e.g., "ABOLIN, septième abbé...")
-
-    bio_pattern = re.compile(
-        r'^'
-        r'(\*?\s*'                                    # Optional asterisk
-        r'[' + UC + r']'                              # First uppercase letter
-        r'[' + UC + r'\-\' ]{1,50})'                  # Rest of name (uppercase, hyphens, apostrophes)
-        r'\s*'
-        r'(?:'
-        r'\([^)]{2,}'                                 # Followed by (Prénom... — at least 2 chars inside
-        r'|'
-        r',\s*(?:'                                    # Or comma followed by biographical descriptors
-        r'(?:dit|née?|saint|abbé|évêque|roi|duc|'
-        r'comte|baron|prince|seigneur|chevalier|'
-        r'cardinal|chanoine|prieur|moine|'
-        r'peintre|sculpteur|graveur|dessinateur|'
-        r'écrivain|poète|musicien|compositeur|'
-        r'architecte|médecin|chirurgien|'
-        r'professeur|docteur|théologien|'
-        r'homme\s+de|militaire|général|colonel|capitaine|'
-        r'avocat|juriste|jurisconsulte|'
-        r'historien|chroniqueur|annaliste|'
-        r'imprimeur|libraire|éditeur|'
-        r'philologue|philosophe|mathématicien|'
-        r'naturaliste|botaniste|astronome|'
-        r'diplomate|magistrat|conseiller|'
-        r'ingénieur|amiral|navigateur|'
-        r'florissait|vivait|mort|décédé|'
-        r'\d{1,2}e?\s*(?:abbé|évêque|comte|duc))'     # ordinal + title
-        r'|[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþ]'        # Or just lowercase word after comma
-        r')'
-        r')',
-        re.MULTILINE
+    text = re.sub(
+        rf'^(\*\s*)?([{UC}] ){{2,}}[{UC}][{UC}]*',
+        _collapse,
+        text,
+        flags=re.MULTILINE
     )
-
-    matches = list(bio_pattern.finditer(text))
-
-    if not matches:
-        return []
-
-    # Filter out false positives
-    filtered = []
-    for m in matches:
-        name = m.group(1).strip().lstrip('*').strip()
-        # Name should have at least 2 characters (after removing spaces)
-        name_collapsed = name.replace(' ', '')
-        if len(name_collapsed) < 2:
-            continue
-        # Skip if name is too long (likely a sentence fragment)
-        if len(name_collapsed) > 40:
-            continue
-        # Skip common false positives - Latin words, roman numerals alone
-        if name_collapsed in ('II', 'III', 'IV', 'VI', 'VII', 'VIII', 'IX', 'XI',
-                              'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII',
-                              'XIX', 'XX', 'XXI', 'ART', 'NOTE', 'NB'):
-            continue
-        filtered.append(m)
-
-    biographies = []
-    for i, match in enumerate(filtered):
-        start = match.start()
-        end = filtered[i + 1].start() if i + 1 < len(filtered) else len(text)
-        bio_text = text[start:end].strip()
-        header = match.group(0).strip()
-        biographies.append((header, bio_text))
-
-    return biographies
+    return text
 
 
-def extract_filename(header, bio_text):
-    """Extract filename from biography header.
+# ─────────────────────────────────────────────
+# STEP 4: Extract filename and classify entries
+# ─────────────────────────────────────────────
 
-    Format: NOM (Prénom).txt
-    """
+def extract_filename(bio_text):
+    """Extract NOM (Prénom).txt from the first line."""
     first_line = bio_text.split('\n')[0].strip()
 
-    # Try pattern: NAME (Prénom), ... or NAME (Prénom VAN), ...
+    # Pattern 1: NAME (Prénom)
     m = re.match(
-        rf'^(\*?\s*[{UC}][{UC}\s\-\'\.]*'
-        r'\s*\([^)]*\))',
+        rf'^(\*?\s*[{UC}][{UC}\s\-\'\.]*\s*\([^)]*\))',
         first_line
     )
     if m:
         name = m.group(1).strip().lstrip('*').strip()
     else:
-        # Try NAME, description pattern — take just the name
+        # Pattern 2: NAME, description — extract name + optional (Prénom) after
         m = re.match(
             rf'^(\*?\s*[{UC}][{UC}\s\-\'\.]*)',
             first_line
@@ -273,109 +399,122 @@ def extract_filename(header, bio_text):
             name = first_line[:60]
 
     name = name.strip().rstrip('.')
-
-    # Replace filesystem-forbidden characters: \ / : * ? " < > |
+    # Filesystem-safe
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
-    # Clean up multiple spaces
     name = re.sub(r'\s+', ' ', name)
 
     return name + '.txt'
 
 
 def is_cross_reference(bio_text):
-    """Check if a biography entry is just a cross-reference (Voir ...)."""
+    """Check if entry is just a 'Voir X' redirect."""
     text = bio_text.strip()
     lines = [l for l in text.split('\n') if l.strip()]
     full = ' '.join(lines)
-    # A cross-reference contains "Voir" (possibly concatenated like "VoirSPIRA")
-    if len(full) < 300 and re.search(r'Voir', full, re.IGNORECASE):
+    if len(full) < 300 and re.search(r'Voir', full):
         return True
     return False
 
 
 def is_false_positive(bio_text):
-    """Detect entries that are clearly not biographies (fragments, footnotes, etc.)."""
+    """Detect fragments, footnotes, and non-biography entries."""
     text = bio_text.strip()
+    first_line = text.split('\n')[0].strip()
 
-    # Very short fragments that are just name variants or incomplete
-    if len(text) < 80:
-        # Bibliography reference or footnote
-        if re.match(r'^[A-Z\s\-]+,?\s*(pp?\.\s*\d|t\.\s*[IVX\d]|édit\.|l\.\s*[IVX])', text):
+    # Blacklisted "names" that are not biographies
+    BLACKLIST = {
+        'IDEM', 'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
+        'NIES', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
+    }
+    first_word = re.sub(r'^\*\s*', '', first_line).split()[0] if first_line.split() else ''
+    first_word_clean = re.sub(r'[.,;:\(\)]', '', first_word)
+    if first_word_clean in BLACKLIST:
+        return True
+
+    # Roman numeral entries (XXX, XXXIV, etc.)
+    roman_match = re.match(r'^[IVXLCDM]{2,}(\s|$)', first_line)
+    if roman_match:
+        # Only allow if it looks like a real name (has lowercase or parentheses nearby)
+        rest = first_line[roman_match.end():].strip()
+        if not rest.startswith('(') and not rest.startswith(','):
             return True
-        # Just a name with "ou" (variant name, part of previous bio)
+
+    # Short initials like "E.V. D.B." or "T'A" — not biography names
+    name_part = first_line.split('(')[0].split(',')[0].strip()
+    name_part = re.sub(r'^\*\s*', '', name_part)
+    # Names with apostrophe fragments like "T'A" or very short non-name tokens
+    if len(name_part) <= 4 and not re.match(rf'^[{UC}]{{3,}}$', name_part):
+        return True
+    if "'" in name_part and len(name_part.replace("'", '')) <= 3:
+        return True
+    # First word too short to be a biography name (e.g., "T'A kers, seker...")
+    first_name_word = name_part.split()[0] if name_part.split() else ''
+    first_word_letters = re.sub(r'[^A-Za-zÀ-ÿ]', '', first_name_word)
+    if len(first_word_letters) < 3:
+        return True
+
+    # Initials pattern like "E.V. D.B."
+    if re.match(r'^[A-Z]\.[A-Z]?\.\s*[A-Z]?\.\s*[A-Z]?\.', first_line):
+        return True
+
+    if len(text) < 80:
         if re.search(r'\bou\b|\bOU\b', text):
             return True
-        # Name fragment ending abruptly: NAME (Prénom). or NAME (Prénom),
-        # without actual biographical content
         lines = [l for l in text.split('\n') if l.strip()]
         full = ' '.join(lines)
-        # If it's just a name possibly followed by a single word or nothing
         if re.match(rf'^[{UC}\s\-\']+\s*(\([^)]*\))?\s*[.,;:]?\s*\S{{0,30}}\s*$', full):
             return True
 
-    # Entries under 150 chars that end mid-sentence (no period/author at end)
-    # These are fragments that got split from the previous or next biography
+    # Truncated fragments (end mid-sentence, < 150 chars)
     if len(text) < 150:
-        # Check if text ends abruptly (no sentence-ending punctuation)
         last_char = text.rstrip()[-1] if text.rstrip() else ''
         if last_char not in '.!?:)' and not re.search(r'[A-Z][a-z]+\.\s*$', text):
-            # Doesn't end with punctuation or an author name
-            # Check if it looks like a truncated fragment
             if not re.search(r'\.\s*$', text):
                 return True
 
     return False
 
 
+# ─────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────
+
 def main():
     print(f"Opening {PDF_PATH}...")
     doc = fitz.open(PDF_PATH)
     print(f"Total pages: {len(doc)}")
+    print(f"Biography pages: {BIO_START_PAGE + 1} to {BIO_END_PAGE}")
 
-    # Step 1: Extract raw text from biography pages
-    print(f"Extracting text from page {BIO_START_PAGE + 1} onwards...")
-    pages = []
-    for i in range(BIO_START_PAGE, len(doc)):
-        text = doc[i].get_text()
-        pages.append((i + 1, text))
+    # Step 1: Collect all lines with metadata
+    print("Extracting text with font metadata...")
+    all_lines, bio_starts = collect_bio_starts(doc)
+    print(f"Total text lines extracted: {len(all_lines)}")
+    print(f"Biography starts detected: {len(bio_starts)}")
 
-    # Step 2: Clean and merge
-    print("Cleaning and merging pages...")
-    full_text = merge_pages(pages)
-
-    # Step 3: Collapse spaced-out names
-    print("Collapsing spaced-out names...")
-    full_text = collapse_spaced_names(full_text)
-
-    # Step 4: Dehyphenate
-    print("Dehyphenating...")
-    full_text = dehyphenate(full_text)
-
-    # Step 5: Join broken lines
-    print("Joining broken lines...")
-    full_text = join_broken_lines(full_text)
-
-    # Step 6: Normalize whitespace
-    full_text = normalize_whitespace(full_text)
-
-    # Step 7: Segment into biographies
+    # Step 2: Extract text between consecutive starts
     print("Segmenting biographies...")
-    biographies = segment_biographies(full_text)
-    print(f"Found {len(biographies)} biography entries")
+    biographies = []
+    for i, (gidx, pidx, ld) in enumerate(bio_starts):
+        end_gidx = bio_starts[i + 1][0] if i + 1 < len(bio_starts) else len(all_lines)
+        raw_text = extract_bio_text(all_lines, gidx, end_gidx)
+        clean_text = clean_biography_text(raw_text)
+        biographies.append(clean_text)
 
-    # Step 8: Create output directory (fresh)
+    print(f"Biographies segmented: {len(biographies)}")
+
+    # Step 3: Create output directory
     if os.path.exists(OUTPUT_DIR):
         shutil.rmtree(OUTPUT_DIR)
     os.makedirs(OUTPUT_DIR)
 
-    # Step 9: Write files and generate report
+    # Step 4: Write files and report
     log_entries = []
     written = 0
     skipped_xrefs = 0
     skipped_false = 0
     filename_counts = {}
 
-    for header, bio_text in biographies:
+    for bio_text in biographies:
         if is_cross_reference(bio_text):
             skipped_xrefs += 1
             continue
@@ -384,9 +523,8 @@ def main():
             skipped_false += 1
             continue
 
-        filename = extract_filename(header, bio_text)
+        filename = extract_filename(bio_text)
 
-        # Handle duplicate filenames
         if filename in filename_counts:
             filename_counts[filename] += 1
             base, ext = os.path.splitext(filename)
@@ -396,13 +534,11 @@ def main():
 
         filepath = os.path.join(OUTPUT_DIR, filename)
 
-        clean_text = bio_text.strip()
-
         with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(clean_text)
+            f.write(bio_text)
 
-        word_count = len(clean_text.split())
-        char_count = len(clean_text)
+        word_count = len(bio_text.split())
+        char_count = len(bio_text)
         status = "OK" if char_count >= 150 else "ALERTE: très court"
 
         log_entries.append(f"{filename} | {word_count} mots | {char_count} car. | {status}")
@@ -434,6 +570,19 @@ def main():
     print(f"  {skipped_xrefs} renvois ignorés")
     print(f"  {skipped_false} faux positifs ignorés")
     print(f"  Rapport: {LOG_FILE}")
+
+    # Show a few examples for verification
+    print("\n--- EXEMPLES ---")
+    samples = ["AGURTO", "ACHELEN", "ABBÉ", "BAUDOUIN DE BOUCLE"]
+    for s in samples:
+        for fn in os.listdir(OUTPUT_DIR):
+            if s in fn:
+                fp = os.path.join(OUTPUT_DIR, fn)
+                with open(fp, 'r', encoding='utf-8') as f2:
+                    content = f2.read()
+                print(f"\n{fn}: {len(content)} car., {len(content.split())} mots")
+                print(f"  Début: {content[:120]}...")
+                break
 
 
 if __name__ == "__main__":
