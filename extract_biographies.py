@@ -116,7 +116,7 @@ def is_biography_start(line_data, next_line_data=None):
     first = spans[0]
 
     # ── Method 1: Bold start ──
-    if first['bold'] and first['size'] >= 7.5:
+    if first['bold'] and first['size'] >= 7.0:
         # Collect bold name part
         bold_parts = []
         for s in spans:
@@ -143,7 +143,7 @@ def is_biography_start(line_data, next_line_data=None):
                     re.match(r'^ou\s', rest, re.IGNORECASE) or
                     bold_name.rstrip().endswith(',') or bold_name.rstrip().endswith('(')):
                     # Filter out footnotes at bottom of page (y > 520 and size < 7.5)
-                    if y > 520 and first['size'] < 7.5:
+                    if y > 520 and first['size'] < 7.0:
                         return False
                     # Filter author signatures: "P. F. X. de Ram." pattern
                     if re.match(r'^[A-Z]\.\s*[A-Z]', bold_name):
@@ -158,7 +158,8 @@ def is_biography_start(line_data, next_line_data=None):
     if re.match(rf'^[{UC}]( [{UC}]){{2,}}', check_text):
         # Spaced uppercase letters - this is a biography name
         rest = full[len(first_text):].strip()
-        if rest.startswith('(') or rest.startswith(','):
+        if (rest.startswith('(') or rest.startswith(',') or
+            re.match(r'^ou\s', rest, re.IGNORECASE)):
             return True
 
     # ── Method 3: Regular uppercase name (non-bold, non-spaced) ──
