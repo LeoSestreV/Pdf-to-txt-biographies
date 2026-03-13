@@ -3,7 +3,7 @@
 Extract biographies from BiographieNationale_Volume1.pdf
 
 Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
-to reliably segment biographies. Page headers are filtered by Y-position.
+and indentation analysis to reliably segment biographies.
 """
 
 import fitz  # PyMuPDF
@@ -18,17 +18,29 @@ LOG_FILE = "rapport_final.log"
 BIO_START_PAGE = 41
 BIO_END_PAGE = 469
 HEADER_Y_THRESHOLD = 60.0
+FOOTER_Y_THRESHOLD = 590.0
 
 UC = r'A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞ'
 
-NAME_PARTICLES = {'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
-                  'VANDER', 'VANDEN', 'VANDE', 'VER', 'TER', 'TEN', 'TE',
-                  'D', "D'", 'OU', 'ET', 'ou', 'le', 'la', 'de', 'du', 'des'}
+# X-position ranges for biography start indentation (alinéa)
+# Left column: body text ~138-143, bio starts ~146-160
+# Right column: body text ~302-307, bio starts ~308-325
+LEFT_COL_INDENT_MIN = 146
+LEFT_COL_INDENT_MAX = 165
+RIGHT_COL_INDENT_MIN = 308
+RIGHT_COL_INDENT_MAX = 330
+COL_BOUNDARY = 290
 
 
 def extract_page_data(page, page_idx):
-    """Extract text spans with metadata from a page."""
-    lines_data = []
+    """Extract text spans with metadata from a page.
+
+    Merges line objects that share the same y-position (within 2px tolerance)
+    into a single logical line, sorted by x-position. This handles cases where
+    the PDF splits a single visual line into multiple line objects (e.g.,
+    "ADRIEN" + "LE" + "CHARTREUX," as separate line objects at the same y).
+    """
+    raw_lines = []
     blocks = page.get_text('dict')['blocks']
 
     for b in blocks:
@@ -61,33 +73,122 @@ def extract_page_data(page, page_idx):
             if not spans:
                 continue
 
-            full_text = ''.join(s['text'] for s in spans).strip()
-            has_bold_start = spans[0]['bold'] if spans else False
+            raw_lines.append((y_top, x_left, spans))
 
-            lines_data.append({
-                'y': y_top,
-                'x': x_left,
-                'spans': spans,
-                'full_text': full_text,
-                'has_bold_start': has_bold_start,
-                'page': page_idx,
-            })
+    # Merge lines with same y-position (within 2px tolerance) AND same column.
+    # First group by approximate y and column, then sort spans by x within group.
+    raw_lines.sort(key=lambda t: (t[0], t[1]))
+
+    # Group lines that are within 2px y tolerance and same column
+    groups = []  # list of (min_y, min_x, [spans_with_x])
+    for y, x, spans in raw_lines:
+        is_left = x < COL_BOUNDARY
+        merged = False
+        for g in groups:
+            g_y, g_x, g_spans_list, g_is_left = g
+            if abs(y - g_y) <= 2.0 and is_left == g_is_left:
+                g_spans_list.append((x, spans))
+                # Update min y and min x
+                g[0] = min(g[0], y)
+                g[1] = min(g[1], x)
+                merged = True
+                break
+        if not merged:
+            groups.append([y, x, [(x, spans)], is_left])
+
+    lines_data = []
+    # Sort groups: left column first (by y), then right column (by y)
+    # This preserves reading order in a two-column layout
+    groups.sort(key=lambda g: (0 if g[3] else 1, g[0], g[1]))
+
+    for min_y, min_x, spans_list, is_left in groups:
+        # Sort spans within group by x-position
+        spans_list.sort(key=lambda t: t[0])
+        merged_spans = []
+        for k, (sx, sp) in enumerate(spans_list):
+            if k > 0 and merged_spans:
+                # Add space between spans from different line objects
+                last_text = merged_spans[-1]['text']
+                first_text = sp[0]['text'] if sp else ''
+                if last_text and not last_text.endswith(' ') and \
+                   first_text and not first_text.startswith(' '):
+                    merged_spans.append({
+                        'text': ' ', 'bold': False, 'italic': False,
+                        'size': 0, 'font': '',
+                    })
+            merged_spans.extend(sp)
+
+        full_text = ''.join(s['text'] for s in merged_spans).strip()
+        has_bold_start = merged_spans[0]['bold'] if merged_spans else False
+
+        lines_data.append({
+            'y': min_y,
+            'x': min_x,
+            'spans': merged_spans,
+            'full_text': full_text,
+            'has_bold_start': has_bold_start,
+            'page': page_idx,
+        })
 
     return lines_data
 
 
-def is_biography_start(line_data, next_line_data=None):
-    """Detect if a line is the start of a new biography entry."""
+def get_first_real_span(spans):
+    """Get the first non-empty, non-asterisk span."""
+    for s in spans:
+        text = s['text'].strip()
+        if text and text != '*':
+            return s
+    return spans[0] if spans else None
+
+
+def is_indented_for_bio(x):
+    """Check if x-position corresponds to biography start indentation."""
+    if x < COL_BOUNDARY:
+        return LEFT_COL_INDENT_MIN <= x <= LEFT_COL_INDENT_MAX
+    else:
+        return RIGHT_COL_INDENT_MIN <= x <= RIGHT_COL_INDENT_MAX
+
+
+def has_name_pattern(text):
+    """Check if text starts with an uppercase name followed by ( or , or 'ou'."""
+    text = re.sub(r'^\*\s*', '', text).strip()
+    # NAME (Prénom) or NAME, descriptor or NAME ou ALIAS
+    if re.match(rf'^[{UC}][{UC}\s\-\'\.]+\s*(\(|,|ou\s)', text):
+        name_part = re.split(r'[,(]', text)[0].strip()
+        # Filter out roman numerals alone, single-letter abbreviations
+        name_clean = re.sub(r'[\s\-\'\.]+', '', name_part)
+        if len(name_clean) >= 3 and not re.match(r'^[IVXLCDM]+$', name_clean):
+            return True
+    return False
+
+
+def is_biography_start(line_data, next_line_data=None, prev_line_data=None):
+    """Detect if a line is the start of a new biography entry.
+
+    Detection methods:
+    1. Bold uppercase name (Times-Bold) with ( or , after name
+    2. Spaced small-caps pattern (A B B É)
+    3. Indented line with uppercase name + ( or , (for non-bold entries)
+    4. Indented line with UPPERCASE + italic prénom
+    5. Name alone on a line, next line starts with ( or ,
+    6. Non-indented but preceded by author attribution + has name pattern
+    """
     spans = line_data['spans']
     full = line_data['full_text']
+    x = line_data['x']
     y = line_data['y']
 
     if not spans or not full:
         return False
 
-    first = spans[0]
+    first = get_first_real_span(spans)
+    if not first:
+        return False
 
-    # Method 1: Bold start
+    first_text = first['text'].strip().lstrip('*').strip()
+
+    # --- Method 1: Bold uppercase name ---
     if first['bold'] and first['size'] >= 7.0:
         bold_parts = []
         for s in spans:
@@ -101,91 +202,131 @@ def is_biography_start(line_data, next_line_data=None):
         if not name_clean:
             return False
         upper_count = sum(1 for c in name_clean if c.isupper())
-        if len(name_clean) > 0 and upper_count / len(name_clean) >= 0.6:
-            if upper_count >= 3:
+        if len(name_clean) > 0 and upper_count / len(name_clean) >= 0.5:
+            if upper_count >= 2:
                 rest = full[len(bold_name):].strip()
                 if bold_name.rstrip().endswith('('):
                     rest = '(' + rest
-                # Also check if bold_name itself contains a comma (name + descriptor in one span)
-                has_comma_in_name = ',' in bold_name
+
+                # Check that this is a real name entry, not a footnote/attribution
+                # Footnotes/attributions are small bold text (size < 7.0) at bottom of page
+                if first['size'] < 7.0 and y > 350:
+                    return False
+
+                # Skip author attributions like "P. F. X. de Ram." or "Ad. Siret."
+                if re.match(r'^[A-Z][a-z]*[\.\-]\s*[A-Z]', bold_name):
+                    # Likely author attribution, not biography
+                    if first['size'] < 7.5:
+                        return False
+
+                has_comma = ',' in bold_name
                 if (rest.startswith('(') or rest.startswith(',') or
                     re.match(r'^ou\s', rest, re.IGNORECASE) or
-                    bold_name.rstrip().endswith(',') or bold_name.rstrip().endswith('(') or
-                    has_comma_in_name):
-                    if y > 520 and first['size'] < 7.0:
-                        return False
-                    if re.match(r'^[A-Z]\.\s*[A-Z]', bold_name):
-                        return False
+                    bold_name.rstrip().endswith(',') or
+                    bold_name.rstrip().endswith('(') or
+                    has_comma):
                     return True
 
-    # Method 2: Spaced small-caps
-    first_text = first['text'].strip()
-    check_text = re.sub(r'^\*\s*', '', first_text)
+                # Bold name alone on a line, next line has ( or ,
+                if next_line_data:
+                    next_full = next_line_data['full_text'].strip()
+                    if next_full.startswith('(') or next_full.startswith(','):
+                        return True
+                    if re.match(r'^ou\s', next_full, re.IGNORECASE):
+                        return True
+
+    # --- Method 2: Spaced small-caps ---
+    check_text = re.sub(r'^\*\s*', '', first['text'].strip())
     if re.match(rf'^[{UC}]( [{UC}]){{2,}}', check_text):
-        rest = full[len(first_text):].strip()
+        rest = full[len(first['text'].strip()):].strip()
         if (rest.startswith('(') or rest.startswith(',') or
             re.match(r'^ou\s', rest, re.IGNORECASE)):
             return True
-
-    # Method 3: Regular uppercase name
-    first_real_idx = 0
-    for idx, s in enumerate(spans):
-        if s['text'].strip() in ('*', ''):
-            first_real_idx = idx + 1
-        else:
-            break
-
-    if first_real_idx < len(spans):
-        real_first = spans[first_real_idx]
-        ft = real_first['text'].strip()
-        ft_clean = re.sub(r'^\*\s*', '', ft)
-        ft_name = re.sub(r'\s*\(\s*$', '', ft_clean).strip()
-
-        if re.match(rf'^[{UC}][{UC}\-\' ]+$', ft_name) and len(ft_name) >= 3:
-            name_end_pos = full.find(ft_name) + len(ft_name) if ft_name in full else -1
-            rest = full[name_end_pos:].strip() if name_end_pos >= 0 else ''
-
-            if first_real_idx + 1 < len(spans):
-                next_span = spans[first_real_idx + 1]
-                next_text = next_span['text'].strip()
-                if (next_span['italic'] or
-                    next_text.startswith('(') or next_text.startswith(',') or
-                    rest.startswith('(') or rest.startswith(',')):
-                    return True
-
-            if rest.startswith('(') or rest.startswith(','):
+        # Spaced name alone on line, next line continues
+        if next_line_data:
+            next_full = next_line_data['full_text'].strip()
+            if next_full.startswith('(') or next_full.startswith(','):
                 return True
 
-    # Method 4: Single-span NAME (Prénom) pattern
-    if len(spans) == 1 and not first['bold']:
-        line_text = first['text'].strip()
-        check = re.sub(r'^\*\s*', '', line_text)
-        m = re.match(rf'^([{UC}][{UC}\s\-\']+)\s*\(([^)]+)\)', check)
-        if m:
-            name_part = m.group(1).strip()
-            prenom = m.group(2).strip()
-            if len(name_part) >= 3 and len(prenom) >= 2:
-                if not re.match(r'^\d+$', prenom):
-                    return True
-        m2 = re.match(
-            rf'^([{UC}][{UC}\s\-\']+),\s+[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþ]',
-            check
-        )
-        if m2:
-            name_part = m2.group(1).strip()
-            if len(name_part) >= 3:
-                return True
+    # --- Method 3: Indented uppercase name (non-bold) ---
+    if is_indented_for_bio(x) and has_name_pattern(full):
+        return True
 
-    # Method 5: Name alone on a line, next line starts with ( or ,
+    # --- Method 4: Indented line with UPPERCASE (Italic-Prénom) pattern ---
+    # For entries where bold is lost but name is still uppercase + italic prénom
+    # Must be indented to avoid matching cross-reference text like "PEGHEM (Adrien VAN.)"
+    if is_indented_for_bio(x) and len(spans) >= 2:
+        first_real = get_first_real_span(spans)
+        if first_real and not first_real['bold']:
+            ft = first_real['text'].strip().lstrip('*').strip()
+            ft_name = re.sub(r'\s*\(\s*$', '', ft).strip()
+            if (re.match(rf'^[{UC}][{UC}\-\' ]+$', ft_name) and
+                len(ft_name) >= 3 and
+                not re.match(r'^[IVXLCDM\s]+$', ft_name)):
+                # Next span should be italic (Prénom) or start with ( or ,
+                for s in spans:
+                    if s is first_real:
+                        continue
+                    next_text = s['text'].strip()
+                    if not next_text:
+                        continue
+                    if (s['italic'] or next_text.startswith('(') or
+                        next_text.startswith(',')):
+                        return True
+                    break
+
+    # --- Method 5: Name alone on a line, next line starts with ( or , ---
     full_stripped = full.replace('*', '').strip()
     if (re.match(rf'^[{UC}][{UC}\s\-\'\.]+$', full_stripped) and
-        len(full_stripped) >= 3 and len(full_stripped) <= 50):
+        3 <= len(full_stripped) <= 50 and
+        not re.match(r'^[IVXLCDM\s]+$', full_stripped)):
         if next_line_data:
             next_full = next_line_data['full_text'].strip()
             if next_full.startswith('(') or next_full.startswith(','):
                 return True
             if re.match(r'^\([^)]+\)', next_full):
                 return True
+
+    # --- Method 6: Non-indented NAME (Prénom/,) preceded by author attribution ---
+    # Some entries lost their bold AND their indent in the PDF encoding.
+    # Detect by checking if previous line ends with an author attribution pattern.
+    # Attributions may be merged with body text on the same line, so check
+    # the END of the previous line's text.
+    if prev_line_data and has_name_pattern(full):
+        prev_full = prev_line_data['full_text'].strip()
+        prev_spans = prev_line_data['spans']
+
+        is_attrib = False
+
+        # Check if prev line ends with attribution-like text
+        # Pattern: "Author Name." at the end, e.g., "Ad. Siret.", "P.-D. Kujl."
+        # Also handles OCR-garbled versions like "sir«."
+        if prev_full.endswith('.'):
+            # Check last portion of text for attribution pattern
+            last_part = prev_full.split('.')[-2] if '.' in prev_full[:-1] else prev_full
+            last_part = last_part.strip()
+
+            # Check if last bold spans are small (attribution size)
+            last_bold_spans = [s for s in prev_spans if s['bold'] and s['text'].strip()]
+            if last_bold_spans:
+                max_bold_size = max(s['size'] for s in last_bold_spans)
+                if max_bold_size < 7.5:
+                    is_attrib = True
+
+            # Check for initials-like ending: "Ad. Siret." or "F.-J. Fétis."
+            if re.search(r'[A-Z][a-z]*[\.\-]\s*[A-Z][a-zà-ÿ]+\.\s*$', prev_full):
+                is_attrib = True
+
+            # Check for OCR-garbled attributions
+            if re.search(r'[A-Z][a-z]*\.\s*[a-z]+[«»]+\.\s*$', prev_full):
+                is_attrib = True
+
+            # Check if prev line ends with a "Voir X." cross-reference
+            if re.search(r'\bVoir\b.*\.\s*$', prev_full):
+                is_attrib = True
+
+        if is_attrib:
+            return True
 
     return False
 
@@ -202,7 +343,6 @@ def is_name_continuation(prev_text, curr_text):
     if prev.rstrip().endswith("D'") or prev.rstrip().endswith("d'"):
         return True
 
-    # Hyphenation of uppercase word: "FLA-"
     if re.search(rf'[{UC}]{{2,}}-$', prev.rstrip()):
         return True
 
@@ -229,25 +369,22 @@ def collect_bio_starts(doc):
     bio_starts = []
     for i, (gidx, pidx, ld) in enumerate(all_lines):
         next_ld = all_lines[i + 1][2] if i + 1 < len(all_lines) else None
-        if is_biography_start(ld, next_ld):
+        prev_ld = all_lines[i - 1][2] if i > 0 else None
+        if is_biography_start(ld, next_ld, prev_ld):
             bio_starts.append((gidx, pidx, ld))
 
     # Post-process 1: Remove false starts caused by hyphenation
-    # If the line IMMEDIATELY before a bio start ends with "WORD-" (uppercase hyphenation),
-    # then this "start" is actually a continuation of that word, not a new bio
     filtered = []
     for gidx, pidx, ld in bio_starts:
         if gidx > 0:
             prev_line = all_lines[gidx - 1][2]['full_text'].rstrip()
             if re.search(rf'[{UC}]{{2,}}-$', prev_line):
-                # This is a hyphenation continuation, skip it
                 continue
         filtered.append((gidx, pidx, ld))
     bio_starts = filtered
 
-    # Post-process 2: Merge split names between consecutive bio starts
-    # Only merge when the FIRST bio start's own text (or its immediate continuation)
-    # ends with a name particle, AND the intermediate text is short (name-like)
+    # Post-process 2: Merge ONLY when the gap is 1-2 lines AND
+    # the line just before the next start ends with a name particle
     merged = []
     skip_next = False
     for i in range(len(bio_starts)):
@@ -262,20 +399,20 @@ def collect_bio_starts(doc):
             next_ld = bio_starts[i + 1][2]
             gap = next_gidx - gidx
 
-            if gap <= 3:
-                # Collect all text between the two starts
+            if gap <= 2:
+                # Collect text between starts
                 between_text = []
                 for j in range(gidx, next_gidx):
                     if j < len(all_lines):
                         between_text.append(all_lines[j][2]['full_text'])
                 combined = ' '.join(between_text)
 
-                # Don't merge if the first entry contains "Voir" (cross-reference)
+                # Never merge if first entry contains "Voir" (cross-reference)
                 if 'Voir' in combined:
                     merged.append((gidx, pidx, ld))
                     continue
 
-                # Check if the line just before the next start ends with a particle
+                # Only merge if the line before next start ends with a particle
                 prev_text = all_lines[next_gidx - 1][2]['full_text'] if next_gidx - 1 >= 0 else ''
                 if is_name_continuation(prev_text, next_ld['full_text']):
                     skip_next = True
@@ -318,29 +455,29 @@ def collapse_spaced_names(text):
 
 
 def extract_name_from_lines(raw_lines):
-    """Extract the full biography name from the raw (pre-join) lines.
+    """Extract the biography name from raw lines.
 
-    Scans text to find where the name ends and the description begins.
-    Handles: NAME (Prénom), ou ALTERNATIVE, dit LE SURNOM, etc.
+    Strategy: find bold spans in the first line(s) for the name.
+    If no bold, use uppercase text before the first descriptor word.
     """
-    # Join first few raw lines for name extraction
     header_lines = []
-    for line in raw_lines[:10]:
+    for line in raw_lines[:5]:
         line = line.strip()
         if not line:
             continue
         line = collapse_spaced_names(line)
         header_lines.append(line)
 
-    # Join lines, handling hyphenation
+    if not header_lines:
+        return ''
+
+    # Join first few lines, handling hyphenation
     joined = ''
     for line in header_lines:
         if joined and joined.endswith('-'):
             if line and line[0].islower():
-                # Lowercase continuation: dehyphenate
                 joined = joined[:-1] + line
             elif line and line[0].isupper() and re.search(rf'[{UC}]{{2,}}-$', joined):
-                # Uppercase continuation of uppercase word: FLA- + MAND -> FLAMAND
                 joined = joined[:-1] + line
             else:
                 joined = joined + line
@@ -349,42 +486,50 @@ def extract_name_from_lines(raw_lines):
         else:
             joined = line
 
-    # Descriptor words that signal end of name
+    # Remove leading asterisk
+    joined = re.sub(r'^\*\s*', '', joined).strip()
+
+    # Strategy 1: Find the name by looking for the transition from
+    # uppercase/name-like text to lowercase descriptive text
+    # The name part is: SURNAME (Prénom), ou ALIAS, dit LE SURNOM
+    # It ends when we hit a lowercase descriptor word outside parentheses
+
     DESCRIPTORS = {
         'abbé', 'abbesse', 'administrateur', 'agronome', 'amiral', 'ancien',
         'annaliste', 'antiquaire', 'apôtre', 'architecte', 'archéologue',
-        'artisan', 'artiste', 'artistes', 'astronome', 'auteur',
-        'baron', 'bienfaiteur', 'bienheureux', 'biographe', 'bourgmestre',
-        'bourgeois', 'bénédictin', 'belge',
-        'calligraphe', 'capitaine', 'cardinal', 'cartographe', 'célèbre',
-        'chanoine', 'chantre', 'chapelain', 'chef', 'chevalier', 'chirurgien',
-        'chroniqueur', 'chronologiste', 'coadjuteur', 'colonel', 'combattant',
-        'commerçant', 'commandant', 'commandeur', 'commentateur', 'compilateur',
-        'compositeur', 'comte', 'comtesse', 'confesseur', 'conseiller',
-        'constructeur', 'consul', 'controversiste', 'coseigneur', 'curé',
+        'arrière', 'artisan', 'artiste', 'artistes', 'astronome', 'auteur',
+        'baron', 'baronne', 'bienfaiteur', 'bienheureux', 'biographe',
+        'bourgmestre', 'bourgeois', 'bénédictin', 'belge',
+        'calligraphe', 'calligraphes', 'capitaine', 'cardinal', 'cartographe',
+        'célèbre', 'chanoine', 'chantre', 'chapelain', 'chef', 'chevalier',
+        'chirurgien', 'chroniqueur', 'chronologiste', 'coadjuteur', 'colonel',
+        'combattant', 'commerçant', 'commandant', 'commandeur', 'commentateur',
+        'compilateur', 'compositeur', 'comte', 'comtesse', 'confesseur',
+        'conseiller', 'constructeur', 'consul', 'controversiste', 'coseigneur',
+        'curé',
         'dame', 'dessinateur', 'diplomate', 'directeur', 'docteur', 'dominicain',
         'doyen', 'duc', 'duchesse', 'décédé', 'défenseur',
         'ecclésiastique', 'empereur', 'enseigna', 'ermite', 'escrimeur',
-        'est', 'ethnologue',
+        'est', 'ethnologue', 'exploitant',
         'évêque', 'écolâtre', 'écrivain', 'érudit', 'époux', 'épouse', 'était',
-        'facteur', 'feldmaréchal', 'femme', 'fils', 'financier', 'fille',
-        'fondateur', 'fondatrice', 'forme', 'frère', 'fut',
+        'facteur', 'feld', 'feldmaréchal', 'femme', 'fils', 'financier', 'fille',
+        'florissait', 'fondateur', 'fondatrice', 'forme', 'frère', 'fut',
         'gardien', 'gentilhomme', 'gouverneur', 'grammairien', 'graveur',
-        'guerrier', 'général', 'géographe', 'géologue',
+        'greffier', 'guerrier', 'général', 'géographe', 'géologue',
         'hagiographe', 'helléniste', 'héraldiste', 'historien', 'homme',
         'humaniste', 'hébraïsant',
-        'imprimeur', 'industriel', 'ingénieur', 'instituteur',
+        'il', 'imprimeur', 'industriel', 'ingénieur', 'instituteur',
         'jésuite', 'jurisconsulte', 'juriste',
         'lazariste', 'lecteur', 'libraire', 'licencié', 'littérateur',
-        'lieutenant',
+        'lieutenant', 'luthiste',
         'magistrat', 'major', 'marchand', 'marquis', 'maréchal',
         'mathématicien', 'maître', 'membre', 'militaire', 'minéralogiste',
         'ministre', 'missionnaire', 'moine', 'moraliste', 'musicien', 'médecin',
         'ménestrel',
-        'navigateur', 'naquit', 'neveu', 'noble', 'nommé', 'notaire', 'né',
-        'née',
-        'officier', 'organiste', 'orientaliste', 'ornithologue',
-        'patriote', 'patron', 'peintre', 'personnage', 'philologue',
+        'naquit', 'navigateur', 'neveu', 'noble', 'nommé', 'notaire', 'né',
+        'née', 'négociateur',
+        'officier', 'on', 'organiste', 'orientaliste', 'ornithologue',
+        'patriote', 'patron', 'peintre', 'peintres', 'personnage', 'philologue',
         'philosophe', 'physicien', 'plus', 'poète', 'poëte', 'prédicateur',
         'président', 'prêtre', 'prince', 'princesse', 'prieur', 'procureur',
         'professeur', 'protonotaire', 'prévôt', 'publiciste',
@@ -392,13 +537,9 @@ def extract_name_from_lines(raw_lines):
         'savant', 'sculpteur', 'secrétaire', 'seigneur', 'sénateur', 'sire',
         'soldat', 'statuaire', 'successivement', 'surnommé',
         'théologien', 'théoricien', 'topographe', 'trouvère',
-        'vicaire', 'vivait', 'voyageur',
+        'vicaire', 'vit', 'vivait', 'voyageur',
     }
 
-    # Scan to find where the name ends and description begins
-    # Name ends at:
-    # 1. A descriptor word outside parens
-    # 2. A period followed by space outside parens (sentence end)
     paren_depth = 0
     name_end = len(joined)
 
@@ -406,6 +547,14 @@ def extract_name_from_lines(raw_lines):
     while i < len(joined):
         ch = joined[i]
         if ch == '(':
+            # Check for footnote reference like (1), (I), (2) etc.
+            footnote_match = re.match(r'\([IVX\d]{1,3}\)', joined[i:])
+            if footnote_match:
+                # This is a footnote, not part of the name
+                name_end = i
+                while name_end > 0 and joined[name_end - 1] in ' ,':
+                    name_end -= 1
+                break
             paren_depth += 1
             i += 1
             continue
@@ -415,24 +564,31 @@ def extract_name_from_lines(raw_lines):
             continue
 
         if paren_depth == 0:
-            # Check for period followed by space (sentence end = name end)
+            # Check for sentence start: period + space + uppercase letter
             if ch == '.' and i + 1 < len(joined) and joined[i + 1] == ' ':
-                # Only stop if this is after a word (not an abbreviation like "D'.")
-                # and before a real sentence (not "St." or "etc.")
                 before = joined[:i].rstrip()
+                # Stop at period unless it's a single-letter abbreviation
                 if before and not re.search(r'\b[A-Z]$', before):
-                    # Not a single-letter abbreviation
-                    name_end = i + 1  # include the period
+                    name_end = i + 1
                     break
 
             # Check for descriptor word at word boundary
-            if i > 0:
-                prev_ch = joined[i - 1]
-                if prev_ch in ' ,)':
-                    word_match = re.match(r'[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþé]+', joined[i:])
-                    if word_match:
-                        word = word_match.group(0)
-                        if word in DESCRIPTORS:
+            if i > 0 and joined[i - 1] in ' ,)':
+                word_match = re.match(
+                    r'[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþé]+', joined[i:])
+                if word_match:
+                    word = word_match.group(0)
+                    if word in DESCRIPTORS:
+                        name_end = i
+                        while name_end > 0 and joined[name_end - 1] in ' ,':
+                            name_end -= 1
+                        break
+                    # After closing paren: any lowercase word that isn't
+                    # a name-linking particle signals end of name
+                    if joined[i - 1] == ')' or (i > 1 and ')' in joined[max(0,i-5):i]):
+                        NAME_LINKS = {'ou', 'dit', 'dite', 'surnommé', 'nommé',
+                                      'appelé', 'appelée'}
+                        if word not in NAME_LINKS:
                             name_end = i
                             while name_end > 0 and joined[name_end - 1] in ' ,':
                                 name_end -= 1
@@ -442,8 +598,22 @@ def extract_name_from_lines(raw_lines):
 
     name = joined[:name_end].strip().rstrip(',').strip()
 
-    # Remove leading *
-    name = name.lstrip('*').strip()
+    # If name is still too long (> 80 chars), try to cut at a reasonable point
+    if len(name) > 80:
+        # Try cutting after the first closing parenthesis
+        paren_end = name.find(')')
+        if paren_end > 0 and paren_end < 80:
+            # Check if there's more name after (ou ALIAS, dit LE SURNOM)
+            rest = name[paren_end + 1:].strip()
+            if rest and re.match(r'^(,\s*)?(ou\s|dit\s|dite\s|OU\s)', rest):
+                # Keep looking for second paren close
+                second_paren = rest.find(')')
+                if second_paren > 0:
+                    name = name[:paren_end + 1 + rest.index(')') + 1]
+                else:
+                    name = name[:paren_end + 1]
+            else:
+                name = name[:paren_end + 1]
 
     return name
 
@@ -494,8 +664,8 @@ def extract_filename(bio_text, raw_lines):
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     name = re.sub(r'\s+', ' ', name)
     # Truncate very long names
-    if len(name) > 120:
-        name = name[:120].rstrip()
+    if len(name) > 90:
+        name = name[:90].rstrip()
 
     if not name:
         name = 'UNKNOWN'
@@ -506,58 +676,65 @@ def extract_filename(bio_text, raw_lines):
 def is_cross_reference(bio_text):
     """Check if entry is just a 'Voir X' redirect."""
     text = bio_text.strip()
-    if len(text) < 300 and re.search(r'Voir', text):
+    if len(text) < 300 and re.search(r'\bVoir\b', text):
         return True
     return False
 
 
 def is_false_positive(bio_text):
-    """Detect fragments, footnotes, and non-biography entries."""
-    text = bio_text.strip()
-    first_words = text.split()[:3]
-    first_word = first_words[0] if first_words else ''
+    """Detect fragments, footnotes, and non-biography entries.
 
+    Conservative: only filter out clearly non-biographical content.
+    """
+    text = bio_text.strip()
+    first_word = text.split()[0] if text.split() else ''
     first_word = re.sub(r'^\*\s*', '', first_word)
     first_word_clean = re.sub(r'[.,;:\(\)]', '', first_word)
 
+    # Blacklisted first words that are never biography names
     BLACKLIST = {
-        'IDEM', 'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
-        'NIES', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
+        'IDEM', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
+        'HIC', 'LIBER', 'HUJUS', 'DIXIT',
     }
     if first_word_clean in BLACKLIST:
         return True
 
+    # Latin epitaphs/inscriptions
+    if text.startswith('D. O. M.') or text.startswith('ET DAME'):
+        return True
+
+    # Detect Latin inscriptions: mostly uppercase with Latin words
+    # Only filter if uppercase ratio > 0.8 AND contains Latin indicators
+    sample = text[:300]
+    upper_chars = sum(1 for c in sample if c.isupper())
+    alpha_chars = sum(1 for c in sample if c.isalpha())
+    if alpha_chars > 30 and upper_chars / alpha_chars > 0.8:
+        # Check for Latin indicators
+        latin_words = {'ET', 'QUI', 'QUOD', 'HIC', 'EST', 'FUIT', 'OBIIT',
+                       'ANNO', 'DOMINI', 'JACET', 'CUBAT', 'HUJUS', 'POST',
+                       'DIXIT', 'PONDUS', 'DOCUIT', 'CULTOR', 'FILIT'}
+        words = set(re.findall(r'[A-Z]{2,}', sample))
+        if words & latin_words:
+            return True
+
+    # Standalone particles are not biographies
+    if first_word_clean in {'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER'}:
+        return True
+
+    # Roman numerals alone (not followed by name pattern)
     roman_match = re.match(r'^[IVXLCDM]{2,}(\s|$)', text)
     if roman_match:
         rest = text[roman_match.end():].strip()
         if not rest.startswith('(') and not rest.startswith(','):
             return True
 
-    name_part = text.split('(')[0].split(',')[0].strip()
-    name_part = re.sub(r'^\*\s*', '', name_part)
-    if len(name_part) <= 4 and not re.match(rf'^[{UC}]{{3,}}$', name_part):
-        return True
-    if "'" in name_part and len(name_part.replace("'", '')) <= 3:
-        return True
-    first_name_word = name_part.split()[0] if name_part.split() else ''
-    first_word_letters = re.sub(r'[^A-Za-zÀ-ÿ]', '', first_name_word)
-    if len(first_word_letters) < 3:
+    # Author attribution pattern: "A.-B. Name." or "F.-J. Fétis."
+    if re.match(r'^[A-Z][\.\-][A-Z]?[\.\-]\s*[A-Z][a-z]+', text) and len(text) < 100:
         return True
 
-    if re.match(r'^[A-Z]\.[A-Z]?\.\s*[A-Z]?\.\s*[A-Z]?\.', text):
+    # Very short fragments (< 30 chars) with no sentence structure
+    if len(text) < 30:
         return True
-
-    if len(text) < 80:
-        if re.search(r'\bou\b|\bOU\b', text):
-            return True
-        if re.match(rf'^[{UC}\s\-\']+\s*(\([^)]*\))?\s*[.,;:]?\s*\S{{0,30}}\s*$', text):
-            return True
-
-    if len(text) < 150:
-        last_char = text.rstrip()[-1] if text.rstrip() else ''
-        if last_char not in '.!?:)' and not re.search(r'[A-Z][a-z]+\.\s*$', text):
-            if not re.search(r'\.\s*$', text):
-                return True
 
     return False
 
