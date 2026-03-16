@@ -4,7 +4,7 @@ import re
 doc = fitz.open("/home/user/Pdf-to-txt-biographies/BiographieNationale_Volume1.pdf")
 
 # Define all entries to check: (page_1indexed, [names])
-entries = [
+entries_to_check = [
     (83, ["ADRIANO", "ADRIANI"]),
     (86, ["A GANDAVO"]),
     (104, ["AFFLIGHEM", "AGATHOCHRONUS", "AGNUS"]),
@@ -24,13 +24,13 @@ entries = [
     (224, ["ARBORE", "ARCHANGELUS", "ARCIS", "ARCKEL", "TENERAMUNDANUS"]),
     (288, ["ASPEL"]),
     (294, ["ASSENEDE"]),
-    (313, ["AUDOMARUS"]),
+    (313, ["AUDOMARUS", "SANCTO BERTIO"]),
     (314, ["AUFROI", "AULA"]),
     (326, ["AXPOELE", "AXELPOELE"]),
     (340, ["BACCIUS", "BACHERIUS", "BACHÆRUS", "BACHAERUS"]),
     (341, ["BACHERIUS"]),
     (346, ["BACULETO", "BACX", "BACQUERE"]),
-    (356, ["BAERSIUS", "EBAER", "BAER"]),
+    (356, ["BAERSIUS", "EBAER"]),
     (365, ["BAILLEUL"]),
     (369, ["BAIUS"]),
     (380, ["COSTERE", "PIERKEN"]),
@@ -47,153 +47,90 @@ def get_page_text(page_num_1indexed):
         return ""
     return doc[idx].get_text()
 
-def find_entry_context(text, name, context_chars=500):
+def extract_context(text, name, context_chars=400):
     """Find name in text and return surrounding context"""
     # Try case-insensitive search
     pattern = re.compile(re.escape(name), re.IGNORECASE)
     match = pattern.search(text)
     if match:
-        start = max(0, match.start() - 200)
+        start = max(0, match.start() - 150)
         end = min(len(text), match.end() + context_chars)
         return text[start:end]
     return None
 
 def classify_entry(context, name):
-    """Classify an entry based on its context"""
+    """Classify an entry based on its surrounding text"""
     if context is None:
-        return "FALSE_POSITIVE", "Name not found on this page"
+        return "FALSE_POSITIVE", "Name not found on page"
     
-    # Normalize whitespace for analysis
-    ctx_clean = re.sub(r'\s+', ' ', context)
+    # Normalize for checking
+    ctx_lower = context.lower()
     
-    # Check for "Voir" / "Voy." cross-references near the name
-    # Look for patterns like "NAME ... Voir X" or "NAME ... Voy. X"
-    name_pat = re.compile(re.escape(name), re.IGNORECASE)
-    m = name_pat.search(ctx_clean)
-    if m:
-        after_name = ctx_clean[m.end():m.end()+300]
-        # Cross-ref patterns
-        if re.search(r'^\s*[\(\)A-Za-zé,\.\s]{0,30}(Voy\.|Voir|V\.)\s', after_name):
-            return "CROSS_REF", f"Cross-reference: {after_name[:150].strip()}"
-        if re.search(r'(Voy\.|Voir|V\.)\s', after_name[:100]):
-            # Check if it's a short entry that's mostly a redirect
-            # Look for how much text before next entry
-            return "CROSS_REF", f"Likely cross-ref: {after_name[:150].strip()}"
+    # Check for Voir/Voy. cross-references near the name
+    # Look for patterns like "Voir X" or "Voy." shortly after the name
+    name_pos = ctx_lower.find(name.lower())
+    if name_pos == -1:
+        name_pos = 0
     
-    return "NEEDS_REVIEW", context
+    after_name = ctx_lower[name_pos:]
+    
+    # Cross-reference patterns
+    voir_patterns = [
+        r'voir\s+\w+', r'voy\.\s+\w+', r'voyez\s+\w+',
+        r'v\.\s+\w+', r'voir\s+ce\s+nom', r'voir\s+ce\s+mot',
+    ]
+    
+    is_cross_ref = False
+    for pat in voir_patterns:
+        m = re.search(pat, after_name[:200])
+        if m:
+            is_cross_ref = True
+            break
+    
+    # Check if it's a substantial entry (has multiple lines of content)
+    # A full bio typically has dates, descriptions, etc.
+    after_text = context[name_pos:] if name_pos > 0 else context
+    
+    # Count substantial text after the name
+    lines = [l.strip() for l in after_text.split('\n') if l.strip()]
+    
+    if is_cross_ref:
+        return "CROSS_REF", f"Contains cross-reference redirect"
+    
+    return "NEEDS_REVIEW", "Found on page"
 
-# Now check each entry
+# Now do the actual checking with detailed output
 results = []
 
-for page, names in entries:
+print("=" * 120)
+print(f"{'Page':<6} {'Name':<35} {'Type':<18} {'Notes'}")
+print("=" * 120)
+
+for page, names in entries_to_check:
     text = get_page_text(page)
     # Also get adjacent pages for context
-    text_prev = get_page_text(page - 1) if page > 1 else ""
-    text_next = get_page_text(page + 1) if page < len(doc) else ""
+    text_prev = get_page_text(page - 1)
+    text_next = get_page_text(page + 1)
+    combined = text_prev + "\n===PAGE_BREAK===\n" + text + "\n===PAGE_BREAK===\n" + text_next
     
     for name in names:
-        context = find_entry_context(text, name)
-        
-        # If not found on primary page, check adjacent
-        source_page = page
+        context = extract_context(text, name, 500)
         if context is None:
-            context = find_entry_context(text_prev, name)
-            if context:
-                source_page = page - 1
-        if context is None:
-            context = find_entry_context(text_next, name)
-            if context:
-                source_page = page + 1
+            # Try combined text
+            context = extract_context(combined, name, 500)
         
-        classification, notes = classify_entry(context, name)
-        results.append({
-            'page': page,
-            'found_page': source_page,
-            'name': name,
-            'type': classification,
-            'notes': notes,
-            'context': context
-        })
-
-# Now let's do a more careful manual review of each entry
-# Print all contexts so we can classify properly
-print("=" * 120)
-print(f"{'Page':<6} {'Name':<25} {'Type':<15} Notes")
-print("=" * 120)
-
-for r in results:
-    # Refine classification based on context
-    ctx = r['context']
-    if ctx is None:
-        r['type'] = 'FALSE_POSITIVE'
-        r['final_notes'] = 'Name not found on page'
-        print(f"{r['page']:<6} {r['name']:<25} {r['type']:<15} {r['final_notes']}")
-        continue
-    
-    ctx_clean = re.sub(r'\s+', ' ', ctx).strip()
-    name = r['name']
-    
-    # More refined classification
-    name_pat = re.compile(re.escape(name), re.IGNORECASE)
-    m = name_pat.search(ctx_clean)
-    
-    if m:
-        after = ctx_clean[m.end():m.end()+400]
-        before = ctx_clean[max(0,m.start()-200):m.start()]
-        
-        # Check if it's a "Voir/Voy" cross-reference
-        is_crossref = False
-        
-        # Pattern: name followed shortly by Voy./Voir
-        if re.search(r'^[\s\(\)A-Za-zéèêëàâäùûüïîôöç,\.\-\']{0,60}(Voy\.|Voir|V\.)\s', after, re.IGNORECASE):
-            is_crossref = True
-        
-        # Pattern: within a larger entry, mentioned as cross-ref
-        if re.search(r'(Voy\.|Voir)\s.*?' + re.escape(name), ctx_clean, re.IGNORECASE):
-            # This name appears as the TARGET of a Voir reference, not as its own entry
-            pass
-        
-        if is_crossref:
-            r['type'] = 'CROSS_REF'
-            # Extract the redirect target
-            voir_match = re.search(r'(Voy\.|Voir|V\.)\s+([A-ZÉÈ][A-Za-zéèêëàâäùûüïîôöç\s\-\']+)', after)
-            if voir_match:
-                r['final_notes'] = f"Redirects to {voir_match.group(2).strip()}"
-            else:
-                r['final_notes'] = f"Cross-reference detected"
+        # Print the raw context for manual review
+        print(f"\n--- Page {page}: {name} ---")
+        if context:
+            # Clean up for display
+            display = context.replace('\n', ' | ')
+            # Truncate
+            if len(display) > 600:
+                display = display[:600] + "..."
+            print(f"CONTEXT: {display}")
         else:
-            # Check if it's a substantial bio or just a mention
-            # Look for typical bio markers: birth/death dates, parenthetical descriptions
-            # A real bio entry usually has the name in caps/bold followed by descriptive text
-            
-            # Check if name appears as a heading (caps, possibly with parenthetical info)
-            heading_pat = re.compile(r'(' + re.escape(name) + r'[A-ZÉÈ\s]*[\(\s])', re.IGNORECASE)
-            if heading_pat.search(ctx_clean):
-                # Looks like a heading - check content length
-                r['type'] = 'FULL_BIO'
-                r['final_notes'] = f"Entry found"
-            else:
-                r['type'] = 'NEEDS_REVIEW'
-                r['final_notes'] = f"Unclear - needs context review"
-    else:
-        r['type'] = 'FALSE_POSITIVE'
-        r['final_notes'] = 'Pattern match issue'
-    
-    print(f"{r['page']:<6} {r['name']:<25} {r['type']:<15} {r['final_notes']}")
-
-print("\n\n")
-print("=" * 120)
-print("DETAILED CONTEXT FOR EACH ENTRY (for manual verification)")
-print("=" * 120)
-
-for r in results:
-    ctx = r.get('context', 'NOT FOUND')
-    if ctx:
-        ctx_display = re.sub(r'\s+', ' ', ctx).strip()[:500]
-    else:
-        ctx_display = "NOT FOUND ON PAGE"
-    print(f"\n--- Page {r['page']} | {r['name']} | {r['type']} ---")
-    print(ctx_display)
-    print()
+            print(f"CONTEXT: [NOT FOUND on page {page} or adjacent pages]")
+        
+        results.append((page, name, context))
 
 doc.close()
