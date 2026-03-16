@@ -2,28 +2,13 @@
 RAPPORT D'EXTRACTION - BiographieNationale Volume 1
 ================================================================================
 
-Biographies extraites : 475
-Renvois (Voir...) ignorés : 126
-Faux positifs ignorés : 15
+Biographies extraites : 458
+Renvois (Voir...) ignorés : 133
+Faux positifs ignorés : 25
 Total entrées détectées : 616
 
---- ALERTES (17 entrées courtes < 150 car.) ---
-  ADELPHRÈDE, ADELPHRIDE ou ÉDELPHRIDE, dix-neuvième.txt | 21 mots | 146 car. | ALERTE: très court
-  AINARD, aussi.txt | 7 mots | 50 car. | ALERTE: très court
-  NATURASI, MORES, MYSTICA VERBA DEI.txt | 5 mots | 35 car. | ALERTE: très court
-  INCLYTA GESTA JESU CECINIT, CLAROSQUE TRIUMPHOS.txt | 6 mots | 48 car. | ALERTE: très court
-  ARTES DEPINGENS, MILITIAMQUE POLI.txt | 4 mots | 34 car. | ALERTE: très court
-  ELOQUII PICTOR, HORUM CENSOR, CYTIIARISTA.txt | 5 mots | 41 car. | ALERTE: très court
-  PYERIDUM, PIDEI BELLIGEnATOR ERAT.txt | 4 mots | 34 car. | ALERTE: très court
-  ALBERT, abbédeGembloux.txt | 16 mots | 117 car. | ALERTE: très court
-  UT REQUIES ANIMÆ COELESTI DETUR IH ARCE.txt | 7 mots | 40 car. | ALERTE: très court
-  ANASTASE (Olivier D E S A I N T - ).txt | 25 mots | 112 car. | ALERTE: très court
-  ANSFRIDE ou AUFROI (Saint), AUFRIDUS.txt | 5 mots | 37 car. | ALERTE: très court
-  ARNOULD D'ISQUE, en latin ARNOLDUS.txt | 5 mots | 34 car. | ALERTE: très court
-  A SPIRA (Nicolas).txt | 17 mots | 110 car. | ALERTE: très court
-  AUDENAERDE (Robert VAN), AUDEN-AERD.txt | 4 mots | 35 car. | ALERTE: très court
-  AVESNES (Jean D').txt | 7 mots | 37 car. | ALERTE: très court
-  BALDÉRIC ou BAUDRY, en latin.txt | 6 mots | 30 car. | ALERTE: très court
+--- ALERTES (2 entrées courtes < 150 car.) ---
+  ADELPHRÈDE, ADELPHRIDE ou ÉDELPHRIDE.txt | 21 mots | 146 car. | ALERTE: très court
   BASSEVELDE (VAN).txt | 19 mots | 120 car. | ALERTE: très court
 
 --- DÉTAIL COMPLET ---
@@ -33,7 +18,7 @@ Total entrées détectées : 616
   ABLYEN (Corneille).txt | 269 mots | 1671 car. | OK
   ABRAHAM (Jean).txt | 120 mots | 758 car. | OK
   ABRAHAMS (Gérard), ou ABRAHAM, dit Lekkerbeetjen (friand morceau).txt | 209 mots | 1310 car. | OK
-  ABSALON, seizième.txt | 170 mots | 1043 car. | OK
+  ABSALON.txt | 170 mots | 1043 car. | OK
   ABSEL (Guillaume VAN), ou APSEL, ou ABSELIUS.txt | 260 mots | 1661 car. | OK
   ABSHOVEN (Ferdinand VAN).txt | 80 mots | 493 car. | OK
   ABSHOVEN (Ferdinand VAN), appelé le jeune.txt | 69 mots | 409 car. | OK
@@ -48,24 +33,24 @@ Total entrées détectées : 616
   ACKET (Jean).txt | 125 mots | 733 car. | OK
   ADALBAUD OU ADALBALDE (Saint).txt | 1229 mots | 7380 car. | OK
   ADALBÉRON, archevêque de Reims.txt | 2731 mots | 16468 car. | OK
-  ADALBÉRON I.txt | 702 mots | 4171 car. | OK
+  ADALBÉRON Ier.txt | 694 mots | 4123 car. | OK
   ADALBÉRON II.txt | 822 mots | 4989 car. | OK
   ADALBÉRON III.txt | 550 mots | 3262 car. | OK
-  ADALBERT OU ADELBERT, chroni­ queur, qui.txt | 269 mots | 1638 car. | OK
+  ADALBERT OU ADELBERT.txt | 269 mots | 1638 car. | OK
   ADALSINDE ou ADELSENDE (Bienheureuse).txt | 341 mots | 2027 car. | OK
   ADÉLAÏDE (Bienheureuse).txt | 273 mots | 1602 car. | OK
   ADÉLARD (Saint), OU ADALARD.txt | 4665 mots | 28019 car. | OK
   ADÉLARD I OU ADALARD.txt | 154 mots | 915 car. | OK
   ADÉLARD II.txt | 155 mots | 940 car. | OK
-  ADELARD I, quatrième.txt | 611 mots | 3556 car. | OK
-  ADÉLARD II, Quarante-sixième.txt | 318 mots | 2017 car. | OK
+  ADELARD I.txt | 611 mots | 3556 car. | OK
+  ADÉLARD II (1).txt | 318 mots | 2017 car. | OK
   ADÉLARD OU ADALARD.txt | 358 mots | 2180 car. | OK
   ADELBERT ou ALBERT, archevêque de Magdebourg.txt | 642 mots | 3987 car. | OK
   ADELBOLD ou ATHELBOLD.txt | 896 mots | 5294 car. | OK
   ADÈLE ou ADILE (Sainte).txt | 697 mots | 4117 car. | OK
   ADELHAIREOU ADELHARIUS.txt | 161 mots | 1040 car. | OK
   ADELMAN OU ADELMANNE.txt | 408 mots | 2519 car. | OK
-  ADELPHRÈDE, ADELPHRIDE ou ÉDELPHRIDE, dix-neuvième.txt | 21 mots | 146 car. | ALERTE: très court
+  ADELPHRÈDE, ADELPHRIDE ou ÉDELPHRIDE.txt | 21 mots | 146 car. | ALERTE: très court
   ADELTRUDE (Sainte).txt | 186 mots | 1100 car. | OK
   ADENÈS ou ADANS.txt | 2885 mots | 16923 car. | OK
   ADOLPHE DE WALDECK.txt | 70 mots | 382 car. | OK
@@ -78,7 +63,7 @@ Total entrées détectées : 616
   ADRIAENSSENS (Alexandre) (1).txt | 95 mots | 587 car. | OK
   ADRIAENSSENS (Renier).txt | 258 mots | 1512 car. | OK
   ADRIANSEN (Emmanuel).txt | 448 mots | 2959 car. | OK
-  ADRIANUS D E V E T E R I BUSCO.txt | 405 mots | 2443 car. | OK
+  ADRIANUS DEVETERI BUSCO.txt | 405 mots | 2443 car. | OK
   ADRIEN LE CHARTREUX.txt | 198 mots | 1216 car. | OK
   ADRIEN (Martin-Joseph), ou plutôt Andrien, dit La Neuville, ou Adrien l'aîné.txt | 342 mots | 2054 car. | OK
   ADRIEN (...).txt | 148 mots | 933 car. | OK
@@ -89,7 +74,7 @@ Total entrées détectées : 616
   AELST (Nicolas ou Jean VAN).txt | 161 mots | 988 car. | OK
   AERENDTS (Giselbert).txt | 61 mots | 409 car. | OK
   AERNOUDTS (Barth.) ou ARNOLDI.txt | 240 mots | 1465 car. | OK
-  AERSCHODT ( François - Guillaume VAN).txt | 838 mots | 5015 car. | OK
+  AERSCHODT (François - Guillaume VAN).txt | 838 mots | 5015 car. | OK
   AERSSEN (Corneille D').txt | 2973 mots | 18223 car. | OK
   AERSSEN (François D').txt | 5252 mots | 32008 car. | OK
   AERT (Jean).txt | 96 mots | 594 car. | OK
@@ -106,8 +91,7 @@ Total entrées détectées : 616
   AGYLÆUS (Henri).txt | 1389 mots | 8674 car. | OK
   AIBERT (Saint).txt | 251 mots | 1507 car. | OK
   AIGUILLON (François D').txt | 715 mots | 4614 car. | OK
-  AINARD, aussi.txt | 7 mots | 50 car. | ALERTE: très court
-  ÉMARD, ÉNARD.txt | 48 mots | 315 car. | OK
+  AINARD.txt | 55 mots | 366 car. | OK
   AKEN (Arnould VAN).txt | 97 mots | 569 car. | OK
   AKEN (Guillaume VAN).txt | 69 mots | 467 car. | OK
   AKEN (Henri VAN).txt | 2098 mots | 12436 car. | OK
@@ -115,46 +99,38 @@ Total entrées détectées : 616
   AKEN (Joseph VAN).txt | 79 mots | 451 car. | OK
   AKEN (Nicolas VAN).txt | 76 mots | 480 car. | OK
   AKEN (Sébastien VAN).txt | 140 mots | 845 car. | OK
-  ALAERS (François) ou A L A R D T S.txt | 1154 mots | 7011 car. | OK
-  ALAIN, communément.txt | 1268 mots | 7628 car. | OK
+  ALAERS (François) ou ALARDTS.txt | 1154 mots | 7011 car. | OK
+  ALAIN.txt | 1268 mots | 7628 car. | OK
   ALAIN DE LILLE ou ALANUS DE INSULIS.txt | 744 mots | 4613 car. | OK
-  NATURASI, MORES, MYSTICA VERBA DEI.txt | 5 mots | 35 car. | ALERTE: très court
-  INCLYTA GESTA JESU CECINIT, CLAROSQUE TRIUMPHOS.txt | 6 mots | 48 car. | ALERTE: très court
-  ARTES DEPINGENS, MILITIAMQUE POLI.txt | 4 mots | 34 car. | ALERTE: très court
-  ELOQUII PICTOR, HORUM CENSOR, CYTIIARISTA.txt | 5 mots | 41 car. | ALERTE: très court
-  PYERIDUM, PIDEI BELLIGEnATOR ERAT.txt | 4 mots | 34 car. | ALERTE: très court
   ALAR (Antoine), ALLART, ALLARD ou ALLARDI.txt | 169 mots | 1041 car. | OK
   ALBANY (Louise-Maximiliane-Caroline-Emmanuel, princesse de Stolberg, comtesse D').txt | 724 mots | 4452 car. | OK
-  ALBE (Fern. ALVAREZ D E T O -LÉDE , duc D').txt | 442 mots | 2730 car. | OK
+  ALBÉRIC DE THOSAN OU de TER- DOEST.txt | 411 mots | 2568 car. | OK
   ALBÉRIC DE TROIS-FONTAINES.txt | 1168 mots | 7079 car. | OK
   ALBÉRON I, ou ADALBÉRON.txt | 1977 mots | 11891 car. | OK
-  ALBÉRON II, cinquante-neuvième.txt | 2130 mots | 13592 car. | OK
+  ALBÉRON II.txt | 2130 mots | 13592 car. | OK
   ALBERT.txt | 417 mots | 2612 car. | OK
   ALBERT-CASIMIR.txt | 724 mots | 4478 car. | OK
   ALBERT (Saint), dit DE LOUVAIN, mort le 24 novembre 1192.txt | 1002 mots | 6144 car. | OK
   ALBERT I.txt | 373 mots | 2252 car. | OK
   ALBERT II.txt | 383 mots | 2277 car. | OK
   ALBERT III.txt | 563 mots | 3369 car. | OK
-  ALBERT, abbédeGembloux.txt | 16 mots | 117 car. | ALERTE: très court
   ALBERT DE RETHEL.txt | 481 mots | 2994 car. | OK
-  ALBRIC, treizième.txt | 104 mots | 516 car. | OK
+  ALBRIC.txt | 104 mots | 516 car. | OK
   ALDEBERT (Bienheureux).txt | 178 mots | 1137 car. | OK
   ALDEGONDE (Sainte).txt | 454 mots | 2814 car. | OK
   ALDRINGEN (Jean D').txt | 595 mots | 3727 car. | OK
-  ALDRINGEN (Marc).txt | 324 mots | 1962 car. | OK
+  ALDRINGEN (Marc).txt | 104 mots | 615 car. | OK
   ALEGAMBE (Philippe).txt | 543 mots | 3396 car. | OK
   ALEN (André) ou ALENUS.txt | 156 mots | 1005 car. | OK
-  UT REQUIES ANIMÆ COELESTI DETUR IH ARCE.txt | 7 mots | 40 car. | ALERTE: très court
-  EXOPTAT, ROGITES, LECTOR AMICE, DEUM.txt | 452 mots | 2802 car. | OK
   ALENÇON (François de Valois, duc D').txt | 807 mots | 4967 car. | OK
   ALÈNE (Sainte), HALÈNE ou HÉLÈNE.txt | 438 mots | 2581 car. | OK
   ALER (Paul).txt | 408 mots | 2497 car. | OK
   ALEXANDRE Ier.txt | 654 mots | 4027 car. | OK
-  ALEXANDRE II, soixante et unième.txt | 224 mots | 1392 car. | OK
+  ALEXANDRE II.txt | 224 mots | 1392 car. | OK
   ALEXANDRE.txt | 92 mots | 576 car. | OK
   ALEXANDRE (Pierre).txt | 754 mots | 4513 car. | OK
   ALGERUS, ADELGERUS ou ALGER.txt | 224 mots | 1347 car. | OK
-  ALGOET (François-Antoine).txt | 2659 mots | 16176 car. | OK
+  ALGOET (François-Antoine).txt | 749 mots | 4686 car. | OK
   ALIX ou ALEYDE DE BOURGOGNE.txt | 679 mots | 4111 car. | OK
   ALLAMONT (Antoine D').txt | 176 mots | 1130 car. | OK
   ALLAMONT (Eugène-Albert D').txt | 941 mots | 5820 car. | OK
@@ -176,29 +152,28 @@ Total entrées détectées : 616
   AMAND (Dominique-Joseph).txt | 150 mots | 946 car. | OK
   AMAND (Maximilien).txt | 214 mots | 1306 car. | OK
   AMBIORIX.txt | 4789 mots | 28812 car. | OK
-  GANDENSIS ou A GANDAVO.txt | 259 mots | 1596 car. | OK
-  AMELBERGE (Sainte).txt | 331 mots | 1976 car. | OK
+  AMBROISE DE GAND, AMBROSIUS GANDENSIS ou A GANDAVO.txt | 263 mots | 1624 car. | OK
+  AMELBERGE (Sainte).txt | 90 mots | 546 car. | OK
   AMELRY (François).txt | 387 mots | 2447 car. | OK
   AMEYDEN (Chrétien VAN).txt | 262 mots | 1577 car. | OK
-  AMINGÈRE, dixième.txt | 42 mots | 230 car. | OK
+  AMINGÈRE.txt | 42 mots | 230 car. | OK
   AMMONIUS (Gaspar).txt | 429 mots | 2672 car. | OK
   AMOLGÈRE.txt | 68 mots | 392 car. | OK
   AMOUNET DE HAILLY (Charles-François).txt | 232 mots | 1511 car. | OK
   AMOUR (Saint).txt | 778 mots | 4817 car. | OK
   AMOUR (Charles D').txt | 239 mots | 1562 car. | OK
   AMOUR (Pierre D').txt | 358 mots | 2091 car. | OK
-  ANASTASE (Olivier D E S A I N T - ).txt | 25 mots | 112 car. | ALERTE: très court
   ANCHILCUS (N.).txt | 117 mots | 717 car. | OK
   ANCION (Pascal).txt | 423 mots | 2560 car. | OK
   ANCION (J.-Pascal).txt | 98 mots | 588 car. | OK
   ANCOT (Jean).txt | 238 mots | 1486 car. | OK
   ANCOT (Jean) (1).txt | 271 mots | 1512 car. | OK
   ANCOT (Louis).txt | 227 mots | 1328 car. | OK
-  ANDON, dix-septième.txt | 108 mots | 663 car. | OK
+  ANDON.txt | 108 mots | 663 car. | OK
   ANDRÉ D'AUTRICHE.txt | 2740 mots | 16441 car. | OK
   ANDRÉ (Bienheureux).txt | 143 mots | 878 car. | OK
   ANDRÉ (Valère).txt | 2983 mots | 18896 car. | OK
-  ANDREAS (Laurent), Belge de naissance.txt | 99 mots | 613 car. | OK
+  ANDREAS (Laurent).txt | 99 mots | 613 car. | OK
   ANDRIES (Éméric) ou ANDREÆ.txt | 174 mots | 1080 car. | OK
   ANDRIES (François-Eugène).txt | 291 mots | 1857 car. | OK
   ANDRIES (Josse).txt | 239 mots | 1506 car. | OK
@@ -206,7 +181,6 @@ Total entrées détectées : 616
   ANESEUS (Jean) ou ANSUS.txt | 613 mots | 3688 car. | OK
   ANGELET (Charles-François).txt | 332 mots | 2008 car. | OK
   ANGENOT (Thomas-Joseph).txt | 684 mots | 4414 car. | OK
-  ANGLICUS (Michel).txt | 279 mots | 1687 car. | OK
   ANICIUS.txt | 119 mots | 718 car. | OK
   ANLY (Jean D').txt | 119 mots | 789 car. | OK
   ANNEESSENS (François).txt | 5883 mots | 35747 car. | OK
@@ -215,14 +189,13 @@ Total entrées détectées : 616
   ANS (Paul-Ernest-Ruth D').txt | 1598 mots | 9691 car. | OK
   ANSÉGISE.txt | 481 mots | 2988 car. | OK
   ANSÉGISE, mort vers 673.txt | 328 mots | 1876 car. | OK
-  ANSELME, quarante-cinquième.txt | 342 mots | 2143 car. | OK
+  ANSELME.txt | 342 mots | 2143 car. | OK
   ANSELME (le père).txt | 104 mots | 625 car. | OK
-  ANSELME.txt | 387 mots | 2395 car. | OK
-  ANSELME D E GEMBLOUX.txt | 301 mots | 1779 car. | OK
-  ANSELME (1).txt | 152 mots | 928 car. | OK
+  ANSELME (1).txt | 387 mots | 2395 car. | OK
+  ANSELME DE GEMBLOUX.txt | 301 mots | 1779 car. | OK
+  ANSELME (2).txt | 152 mots | 928 car. | OK
   ANSELME DE FLANDRE, ou le FLAMAND.txt | 365 mots | 2253 car. | OK
   ANSELMO (Antoine).txt | 1249 mots | 8317 car. | OK
-  ANSFRIDE ou AUFROI (Saint), AUFRIDUS.txt | 5 mots | 37 car. | ALERTE: très court
   ANSFREDUS, GAUFRIDUS.txt | 489 mots | 2937 car. | OK
   ANSIAUX (Emmanuel-Antoine-Joseph).txt | 455 mots | 2759 car. | OK
   ANSIAUX (Jean-Joseph-Éléonore-Antoine).txt | 234 mots | 1494 car. | OK
@@ -236,7 +209,7 @@ Total entrées détectées : 616
   ANTHONISSEN (Pierre).txt | 155 mots | 955 car. | OK
   ANTOINE DE BOURGOGNE.txt | 1050 mots | 6248 car. | OK
   ANTOING (Henri D').txt | 305 mots | 1886 car. | OK
-  ANVERS (Laurent D ' ).txt | 236 mots | 1435 car. | OK
+  ANVERS (Laurent D ').txt | 236 mots | 1435 car. | OK
   APOLLONIUS (Levinus).txt | 353 mots | 2253 car. | OK
   APOSTOLE (Pierre), ou APOSTOCLE, LAPOSTOLE, DEL' APOSTOLE.txt | 640 mots | 3963 car. | OK
   APPELMANS (Jean et Pierre).txt | 880 mots | 5489 car. | OK
@@ -265,29 +238,28 @@ Total entrées détectées : 616
   ARGENTIL (Charles D').txt | 143 mots | 904 car. | OK
   ARMIGER (Nicolas).txt | 77 mots | 508 car. | OK
   ARNAL (Jean).txt | 123 mots | 756 car. | OK
-  E.V. D.B.txt | 91 mots | 567 car. | OK
   ARNOLDI (Olanus-Nic.).txt | 77 mots | 472 car. | OK
-  ARNALDUS ou ARNALDUS DE BRUXELLA, aussi appelé FIAMINGO.txt | 301 mots | 1986 car. | OK
+  ARNALDUS ou ARNALDUS DE BRUXELLA.txt | 301 mots | 1986 car. | OK
   ARNOUL Ier.txt | 377 mots | 2257 car. | OK
   ARNOUL II.txt | 167 mots | 964 car. | OK
-  ARIVOIIL III.txt | 147 mots | 850 car. | OK
+  ARNOUL III.txt | 147 mots | 848 car. | OK
   ARNOUL OU ARNULPHE DE GAND.txt | 1210 mots | 7181 car. | OK
   ARNOUL II (1).txt | 1027 mots | 6226 car. | OK
-  ARNOUL III.txt | 444 mots | 2772 car. | OK
+  ARNOUL III (1).txt | 444 mots | 2772 car. | OK
   ARNOUL IV.txt | 1427 mots | 8387 car. | OK
   ARNOUL V.txt | 3130 mots | 19061 car. | OK
   ARNOULD DE DERGHEYCK, dit ORYDRIUS.txt | 162 mots | 1023 car. | OK
   ARNOULD DE BINCHE.txt | 291 mots | 1761 car. | OK
-  ARNOULD ou ARNOLT DE BRUCK, mais.txt | 235 mots | 1511 car. | OK
+  ARNOULD ou ARNOLT DE BRUCK.txt | 235 mots | 1511 car. | OK
   ARNOULD DE FLANDRES ou ARNAO DE FLANDES.txt | 110 mots | 688 car. | OK
   ARNOULD DE FLANDRE, ou le FLAMAND, en latin Arnoldus Flandrus.txt | 260 mots | 1644 car. | OK
-  ARNOULD D'ISQUE, en latin ARNOLDUS.txt | 5 mots | 34 car. | ALERTE: très court
-  AB YSSCHA.txt | 557 mots | 3555 car. | OK
+  ARNOULD D'ISQUE, en latin ARNOLDUS AB YSSCHA.txt | 562 mots | 3590 car. | OK
   ARNOULD.txt | 104 mots | 635 car. | OK
   ARNOULT (Christophe D').txt | 242 mots | 1483 car. | OK
   ARNULPHE ou ARNOUL (Saint).txt | 514 mots | 3184 car. | OK
   ARNULPHE DE SAINT-GHISLAIN (Maître).txt | 84 mots | 564 car. | OK
-  ARRIGO (Nicolas), dit FLAMINGO.txt | 1386 mots | 8550 car. | OK
+  ARRIGO (Nicolas), dit FLAMINGO.txt | 74 mots | 453 car. | OK
+  ARSCHOT (Arnulf comte D').txt | 1312 mots | 8096 car. | OK
   ARSENE, dit DE LIÉGE, camérier du pape Eugène IV.txt | 290 mots | 1817 car. | OK
   ARTEVELDE (Jacques D').txt | 2447 mots | 14996 car. | OK
   ARTEVELDE (Philippe D').txt | 1016 mots | 6026 car. | OK
@@ -296,7 +268,6 @@ Total entrées détectées : 616
   ARTOT (Alexandre-Joseph).txt | 769 mots | 4470 car. | OK
   ASCELIN ou AZELIN DE TRONCHIENNES.txt | 167 mots | 993 car. | OK
   AS CLOQUETTES (Michel).txt | 679 mots | 4057 car. | OK
-  A SPIRA (Nicolas).txt | 17 mots | 110 car. | ALERTE: très court
   ASPREMONT-LYNDEN (Ferdinand-Charles-Gobert, comte D').txt | 125 mots | 843 car. | OK
   ASPREMONT-LYNDEN (Ferdinand-Gobert, comte D').txt | 244 mots | 1575 car. | OK
   ASPREMONT-LYNDEN (Guillaume-Joseph-Hyacinthe-Gobert-Maurice, comte D').txt | 84 mots | 566 car. | OK
@@ -311,7 +282,7 @@ Total entrées détectées : 616
   ASSONLEVILLE (Christophe D') ou ASSONVILLE ou DASSONLEVILLE.txt | 2093 mots | 12845 car. | OK
   ASSONLEVILLE (Guillaume D').txt | 103 mots | 716 car. | OK
   ASSONLEVILLE (Hubert D').txt | 98 mots | 696 car. | OK
-  ASTROY (Barthélemy D').txt | 1765 mots | 10953 car. | OK
+  ASTROY (Barthélemy D').txt | 643 mots | 3995 car. | OK
   ATHIN (Wathier ou Wauthier D'), DATIN ou DATHYN, DATINIUS.txt | 1417 mots | 8672 car. | OK
   AUBERMONT (Jean-Antoine D').txt | 325 mots | 2269 car. | OK
   AUBERT OU ALBERT DE BAVIÈRE.txt | 1650 mots | 9807 car. | OK
@@ -321,12 +292,11 @@ Total entrées détectées : 616
   AUCHY (Michel D').txt | 392 mots | 2353 car. | OK
   AUDEFROY LE BASTARD.txt | 690 mots | 3964 car. | OK
   AUDEJAN (Hubert), AUDEJANS ou OUDEJANS.txt | 205 mots | 1294 car. | OK
-  AUDENAERDE (Robert VAN), AUDEN-AERD.txt | 4 mots | 35 car. | ALERTE: très court
-  ou OUDENAERDE.txt | 2465 mots | 15202 car. | OK
+  AUDENAERDE (Robert VAN), AUDEN-AERD ou OUDENAERDE.txt | 2469 mots | 15238 car. | OK
   AUDENAERDE (Daniel VAN).txt | 120 mots | 752 car. | OK
   AUDENAERDE OU THOMAS A VIRGINE.txt | 70 mots | 481 car. | OK
   AUFFAY (Jean D') OU DAUFFAY.txt | 871 mots | 5115 car. | OK
-  AUGUSTIN, cinquième.txt | 75 mots | 446 car. | OK
+  AUGUSTIN.txt | 75 mots | 446 car. | OK
   AURATA (Jacques).txt | 495 mots | 3037 car. | OK
   AUSTREBERTE (Sainte).txt | 173 mots | 1123 car. | OK
   AUSTRICUS (Liévin).txt | 298 mots | 1827 car. | OK
@@ -338,7 +308,6 @@ Total entrées détectées : 616
   AUVIN (Jean D') ou DAUVIN.txt | 336 mots | 1994 car. | OK
   AUMEGHEM (Charles VAN).txt | 149 mots | 866 car. | OK
   AVEROULT (Antoine D') OU AVROULTIUS.txt | 365 mots | 2220 car. | OK
-  AVESNES (Jean D').txt | 7 mots | 37 car. | ALERTE: très court
   AVESNES (Baudouin D').txt | 644 mots | 3773 car. | OK
   AVESNES (Bouchard D').txt | 1380 mots | 8803 car. | OK
   AVESNES (Jacques D').txt | 283 mots | 1662 car. | OK
@@ -356,7 +325,7 @@ Total entrées détectées : 616
   AYNSCOM (François-Xavier).txt | 639 mots | 4132 car. | OK
   AYTONA (don Francisco de Moncada, marquis D').txt | 4418 mots | 25937 car. | OK
   AYTTA (Viglius D').txt | 1625 mots | 10271 car. | OK
-  AYTTA D E ZUICHEM (Bucho D').txt | 194 mots | 1230 car. | OK
+  AYTTA DE ZUICHEM (Bucho D').txt | 194 mots | 1230 car. | OK
   AZEVEDO-CONTINHO-Y-BERNAL (Gérard-Dominique).txt | 330 mots | 2017 car. | OK
   AZEVEDO-CONTINHO-Y-BERNAL (Joseph-Félix).txt | 135 mots | 880 car. | OK
   BABOLIN I (Saint).txt | 348 mots | 2105 car. | OK
@@ -369,7 +338,7 @@ Total entrées détectées : 616
   BADENS (François).txt | 190 mots | 1197 car. | OK
   BADENS (Jean).txt | 118 mots | 696 car. | OK
   BADIUS (Josse) ou BADE.txt | 1827 mots | 11556 car. | OK
-  CONRAD BADIUS, dont nous avons parlé.txt | 269 mots | 1741 car. | OK
+  CONRAD BADIUS.txt | 269 mots | 1741 car. | OK
   BADOUX (Robert DE).txt | 72 mots | 438 car. | OK
   BAECHEM DE EGMUNDA (Nicolas).txt | 357 mots | 2156 car. | OK
   BAECX VAN BAERLANDT (Adrien).txt | 555 mots | 3383 car. | OK
@@ -385,9 +354,9 @@ Total entrées détectées : 616
   BAES (Martin).txt | 976 mots | 5810 car. | OK
   BAILLEHAUS (Jehan).txt | 306 mots | 1818 car. | OK
   BAILLENCOURT (François).txt | 231 mots | 1433 car. | OK
-  BAILLET-LATOUR (Charles-Antoine-Maximilien-Joseph comte D E ).txt | 1473 mots | 9397 car. | OK
+  BAILLET-LATOUR (Charles-Antoine-Maximilien-Joseph comte DE).txt | 1473 mots | 9397 car. | OK
   BAILLET (Christophe-Ernest comte DE).txt | 250 mots | 1574 car. | OK
-  BAILLET (Jean-Baptiste-François-Hyacinthe comte DE).txt | 975 mots | 6205 car. | OK
+  BAILLET (Jean-Baptiste-François-Hyacinthe.txt | 115 mots | 708 car. | OK
   BAILLET (Louis-Willebrod-Antoine comte DE BAILLET-LATOUR).txt | 337 mots | 2102 car. | OK
   BAILLIEUR (Corneille DE).txt | 53 mots | 332 car. | OK
   BAILLU (Bernard) ou BALLIU.txt | 396 mots | 2365 car. | OK
@@ -398,11 +367,10 @@ Total entrées détectées : 616
   BALBIAN (Corneille VAN).txt | 65 mots | 375 car. | OK
   BALBIAN (Josse VAN).txt | 171 mots | 1005 car. | OK
   BALDE (Henri).txt | 131 mots | 791 car. | OK
-  BALDÉRIC ou BAUDRY, en latin.txt | 6 mots | 30 car. | ALERTE: très court
-  BALDERICUS.txt | 817 mots | 4846 car. | OK
-  BALDÉRIC, quarante-deuxième.txt | 626 mots | 3965 car. | OK
-  BALDÉRIC I, aussi.txt | 102 mots | 569 car. | OK
-  BALDÉRIC II, aussi.txt | 1033 mots | 6229 car. | OK
+  BALDÉRIC ou BAUDRY, en latin BALDERICUS.txt | 823 mots | 4877 car. | OK
+  BALDÉRIC.txt | 626 mots | 3965 car. | OK
+  BALDÉRIC I.txt | 102 mots | 569 car. | OK
+  BALDÉRIC II.txt | 263 mots | 1540 car. | OK
   BALDUIN (Paschase)ou BALDUINUS.txt | 137 mots | 871 car. | OK
   BALEN (VAN).txt | 59 mots | 330 car. | OK
   BALEN (Henri VAN).txt | 875 mots | 5243 car. | OK
@@ -446,7 +414,7 @@ Total entrées détectées : 616
   BASELE (Pierre VAN).txt | 77 mots | 504 car. | OK
   BASELER (Guillaume).txt | 186 mots | 1149 car. | OK
   BASSE (Frédéric).txt | 771 mots | 4715 car. | OK
-  BASSÉE (Adam DE LA),DE BASSECA ou DE BASSEYA.txt | 511 mots | 3063 car. | OK
+  BASSÉE (Adam DE LA),DE BASSECA.txt | 105 mots | 649 car. | OK
   BASSELIERS (Balthasar).txt | 126 mots | 793 car. | OK
   BASSENGIUS (Gilles).txt | 196 mots | 1261 car. | OK
   BASSENGE (Jean-Nicolas).txt | 4083 mots | 25276 car. | OK
@@ -454,7 +422,7 @@ Total entrées détectées : 616
   BASSERY (Guillaume).txt | 424 mots | 2784 car. | OK
   BASSEVELDE (VAN).txt | 19 mots | 120 car. | ALERTE: très court
   BASSEVELDE (Jean VAN).txt | 354 mots | 2205 car. | OK
-  BASSEVELDE (Casin ou Nicaise VAN), '.txt | 174 mots | 1073 car. | OK
+  BASSEVELDE (Casin ou Nicaise VAN).txt | 174 mots | 1073 car. | OK
   BASSEVELDE (Liévin VAN).txt | 147 mots | 874 car. | OK
   BASSEVELDE (Jacques VAN).txt | 182 mots | 1154 car. | OK
   BASTEEL (Jean-Joseph).txt | 307 mots | 1964 car. | OK
@@ -472,7 +440,7 @@ Total entrées détectées : 616
   BAUD (Jean-Marie).txt | 1533 mots | 9287 car. | OK
   BAUDAERT (Guillaume), BOUDART ou BAUDARTIUS.txt | 1537 mots | 9533 car. | OK
   BAUDEMOND.txt | 534 mots | 3275 car. | OK
-  BAUDIER (Dominique), D E BAULDIER ou BAUDIUS.txt | 1538 mots | 9367 car. | OK
+  BAUDIER (Dominique), DE BAULDIER ou BAUDIUS.txt | 1538 mots | 9367 car. | OK
   BAUDOUIN ou BALDWIN Ier.txt | 378 mots | 2192 car. | OK
   BAUDOUIN II (1).txt | 356 mots | 2041 car. | OK
   BAUDOUIN III, dit le Jeune.txt | 173 mots | 1066 car. | OK
@@ -486,17 +454,17 @@ Total entrées détectées : 616
   BAUDOUIN IV (1).txt | 580 mots | 3589 car. | OK
   BAUDOUIN V (1).txt | 1075 mots | 6346 car. | OK
   BAUDOUIN II, de Courtenay.txt | 7986 mots | 48406 car. | OK
-  BAUDOUIN, quarantième.txt | 507 mots | 3124 car. | OK
-  BAUDOUIN.txt | 73 mots | 456 car. | OK
-  BAUDOUIN (1).txt | 109 mots | 678 car. | OK
+  BAUDOUIN.txt | 507 mots | 3124 car. | OK
+  BAUDOUIN (1).txt | 73 mots | 456 car. | OK
+  BAUDOUIN (2).txt | 109 mots | 678 car. | OK
   BAUDOUIN DE BOUCLE.txt | 630 mots | 3568 car. | OK
   BAUDOUIN DE MAFLIX.txt | 190 mots | 1198 car. | OK
   BAUDOUIN DE NINOVE.txt | 503 mots | 3040 car. | OK
   BAUDOUIN (François).txt | 1662 mots | 9977 car. | OK
   BAUDRI ou BALDERIC.txt | 341 mots | 2092 car. | OK
   BAUDRY (Pierre).txt | 254 mots | 1537 car. | OK
-  BAUDUIN ( Dominique).txt | 195 mots | 1189 car. | OK
-  BAUHUYSEN (Bernard V A N ) , ou BAUHUSIUS.txt | 336 mots | 2033 car. | OK
+  BAUDUIN (Dominique).txt | 195 mots | 1189 car. | OK
+  BAUHUYSEN (Bernard VAN), ou BAUHUSIUS.txt | 336 mots | 2033 car. | OK
   BAURSCHEIT (Jean-Pierre VAN).txt | 708 mots | 4289 car. | OK
   BAURSCHEIT (Jean-Pierre VAN), dit le Jeune.txt | 321 mots | 2023 car. | OK
   BAUT DE RASMON (François-Pierre-Ignace, baron).txt | 368 mots | 2305 car. | OK

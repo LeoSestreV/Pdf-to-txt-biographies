@@ -508,7 +508,7 @@ def extract_name_from_lines(raw_lines):
         'conseiller', 'constructeur', 'consul', 'controversiste', 'coseigneur',
         'curé',
         'dame', 'dessinateur', 'diplomate', 'directeur', 'docteur', 'dominicain',
-        'doyen', 'duc', 'duchesse', 'décédé', 'défenseur',
+        'dont', 'doyen', 'duc', 'duchesse', 'décédé', 'défenseur',
         'ecclésiastique', 'empereur', 'enseigna', 'ermite', 'escrimeur',
         'est', 'ethnologue', 'exploitant',
         'évêque', 'écolâtre', 'écrivain', 'érudit', 'époux', 'épouse', 'était',
@@ -538,6 +538,14 @@ def extract_name_from_lines(raw_lines):
         'soldat', 'statuaire', 'successivement', 'surnommé',
         'théologien', 'théoricien', 'topographe', 'trouvère',
         'vicaire', 'vit', 'vivait', 'voyageur',
+        # Ordinal descriptors (often used for numbered bishops/abbots)
+        'premier', 'première', 'deuxième', 'troisième', 'quatrième',
+        'cinquième', 'sixième', 'septième', 'huitième', 'neuvième',
+        'dixième', 'onzième', 'douzième', 'treizième', 'quatorzième',
+        'quinzième', 'seizième', 'dix-septième', 'dix-huitième',
+        'dix-neuvième', 'vingtième', 'vingt', 'trentième', 'trente',
+        'quarantième', 'quarante', 'cinquantième', 'cinquante',
+        'soixantième', 'soixante',
     }
 
     paren_depth = 0
@@ -649,7 +657,85 @@ def clean_biography_text(raw_lines):
     text = re.sub(r'[ \t]+', ' ', text)
     text = text.strip()
 
+    # Fix known OCR errors in content
+    text = text.replace('ARIVOIIL', 'ARNOUL')
+
     return text
+
+
+def fix_ocr_spacing(name):
+    """Fix OCR artifacts that insert spaces within words.
+
+    E.g., "D E V E T E R I" -> "DE VETERI", "D E" -> "DE", "V A N" -> "VAN"
+    """
+    # First collapse any sequences of single uppercase letters separated by spaces
+    # These are OCR artifacts from spaced small-caps text
+    def collapse_spaced_word(m):
+        letters = m.group(0).replace(' ', '')
+        return letters
+
+    # Collapse sequences of 3+ single uppercase letters separated by spaces
+    name = re.sub(r'(?<![A-ZÀ-Þa-zà-ÿ])(?:[A-ZÀ-Þ] ){2,}[A-ZÀ-Þ](?![A-ZÀ-Þa-zà-ÿ])',
+                  collapse_spaced_word, name)
+
+    # Fix remaining spaced-out common particles: "D E" -> "DE", "V A N" -> "VAN"
+    SPACED_PARTICLES = [
+        (r'\bD E S\b', 'DES'), (r'\bD E N\b', 'DEN'), (r'\bD E R\b', 'DER'),
+        (r'\bV A N\b', 'VAN'), (r'\bV O N\b', 'VON'), (r'\bL E S\b', 'LES'),
+        (r'\bD E\b', 'DE'), (r'\bD U\b', 'DU'),
+        (r'\bL E\b', 'LE'), (r'\bL A\b', 'LA'),
+    ]
+    for pattern, fixed in SPACED_PARTICLES:
+        name = re.sub(pattern, fixed, name)
+
+    # Fix soft hyphens and broken words (chroni­ queur -> chroniqueur)
+    name = re.sub(r'\xad\s*', '', name)  # soft hyphen + optional space
+
+    # Clean up extra spaces around parentheses and punctuation
+    name = re.sub(r'\s+\)', ')', name)
+    name = re.sub(r'\(\s+', '(', name)
+    name = re.sub(r'\s+,', ',', name)
+
+    # Fix known OCR errors
+    name = name.replace('DETO -LÉDE', 'DE TOLÈDE')
+    name = name.replace('DETO-LÉDE', 'DE TOLÈDE')
+    name = name.replace('ARIVOIIL', 'ARNOUL')
+
+    return name
+
+
+def clean_filename_trailing(name):
+    """Remove trailing incomplete phrases from filenames.
+
+    Removes things like ", dont nous avons parlé", ", aussi", ", communément",
+    ", en latin", ", mais" etc.
+    """
+    # Remove trailing incomplete phrases after the real name
+    # These are editorial comments or description starts that got into the name
+    TRAILING_PATTERNS = [
+        r',?\s+dont\s+.*$',           # ", dont nous avons parlé"
+        r',?\s+communément\s*$',      # ", communément" (incomplete)
+        r',?\s+mais\s*$',             # ", mais" (incomplete)
+        r',?\s+Belge\s+de\s+naissance\s*$',  # descriptor, not name
+        r",?\s+chroni\w*,?\s+qui\b.*$",  # broken "chroniqueur, qui..."
+        r",?\s+'\s*$",                # trailing apostrophe
+        r',?\s+aussi\b.*$',            # ", aussi ..." (alias list)
+    ]
+    for pat in TRAILING_PATTERNS:
+        name = re.sub(pat, '', name, flags=re.IGNORECASE)
+
+    # Remove trailing ordinal descriptors: ", seizième", ", dix-septième" etc.
+    # But keep them if they're part of the actual name (like "BAUDOUIN II")
+    name = re.sub(
+        r',\s+(?:premier|première|deuxième|troisième|quatrième|cinquième|'
+        r'sixième|septième|huitième|neuvième|dixième|onzième|douzième|'
+        r'treizième|quatorzième|quinzième|seizième|dix-septième|'
+        r'dix-huitième|dix-neuvième|vingtième|trentième|quarantième|'
+        r'cinquantième|soixantième|Quarante-sixième|quarante-cinquième|'
+        r'cinquante-neuvième)\b.*$',
+        '', name, flags=re.IGNORECASE)
+
+    return name.strip()
 
 
 def extract_filename(bio_text, raw_lines):
@@ -660,6 +746,13 @@ def extract_filename(bio_text, raw_lines):
         name = bio_text.split(',')[0].strip()[:60]
 
     name = name.rstrip('.')
+
+    # Fix OCR spacing artifacts
+    name = fix_ocr_spacing(name)
+
+    # Remove trailing incomplete phrases
+    name = clean_filename_trailing(name)
+
     # Filesystem-safe
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     name = re.sub(r'\s+', ' ', name)
@@ -678,7 +771,55 @@ def is_cross_reference(bio_text):
     text = bio_text.strip()
     if len(text) < 300 and re.search(r'\bVoir\b', text):
         return True
+    # Also catch entries like "VoirSpiRA" (OCR-garbled Voir)
+    if len(text) < 200 and re.search(r'\bVoir[A-Z]', text):
+        return True
+    # OCR-garbled "Voir" patterns: VOUOLBEBT = "Voir OLBERT", etc.
+    if len(text) < 200 and re.search(r'\bVO[A-Z]{3,}', text):
+        return True
     return False
+
+
+def split_merged_entries(bio_text, raw_lines):
+    """Split a bio that contains a cross-reference followed by another biography.
+
+    Some entries have a "Voir X." cross-reference immediately followed by
+    another biography that wasn't detected as a separate start. This splits
+    them into separate entries.
+    Returns a list of (bio_text, raw_lines) tuples.
+    """
+    text = bio_text.strip()
+
+    # Look for "Voir SOMETHING." or "Voir SOMETHING)." followed by an
+    # uppercase name that starts a new biography entry.
+    # Strategy: find "Voir" then scan forward for ")." or sentence-ending ".",
+    # then check if what follows looks like a new biography name.
+    voir_match = re.search(
+        r'\bVoir\s+.{5,150}?\)\.\s*'
+        r'([A-ZÀ-Þ][A-ZÀ-Þa-zà-ÿ\s\-\']+(?:,|\())',
+        text
+    )
+    if not voir_match:
+        voir_match = re.search(
+            r'\bVoir\s+[A-ZÀ-Þ][^\n]{3,80}?\.\s*'
+            r'([A-ZÀ-Þ][A-ZÀ-Þa-zà-ÿ\s\-\']+(?:,|\())',
+            text
+        )
+
+    if voir_match:
+        split_pos = voir_match.start(1)
+        part1 = text[:split_pos].strip()
+        part2 = text[split_pos:].strip()
+        if len(part1) > 10 and len(part2) > 50:
+            # For part2, create synthetic raw_lines from the split text
+            # so that extract_name_from_lines works on the right content
+            part2_raw = [part2[:200]]  # first "line" for name extraction
+            return [
+                (part1, raw_lines[:1]),
+                (part2, part2_raw),
+            ]
+
+    return [(bio_text, raw_lines)]
 
 
 def is_false_positive(bio_text):
@@ -703,6 +844,33 @@ def is_false_positive(bio_text):
     if text.startswith('D. O. M.') or text.startswith('ET DAME'):
         return True
 
+    # Detect Latin verse fragments: lines that are ALL CAPS Latin with no
+    # real biography content (e.g., "INCLYTA GESTA JESU CECINIT, CLAROSQUE TRIUMPHOS")
+    # These are lines from poems/epitaphs embedded in biographies.
+    LATIN_FRAGMENT_WORDS = {
+        'INCLYTA', 'GESTA', 'CECINIT', 'TRIUMPHOS', 'NATURASI', 'MORES',
+        'MYSTICA', 'VERBA', 'DEI', 'ARTES', 'DEPINGENS', 'MILITIAMQUE',
+        'POLI', 'ELOQUII', 'PICTOR', 'HORUM', 'CENSOR', 'CYTIIARISTA',
+        'PYERIDUM', 'PIDEI', 'ERAT', 'REQUIES', 'ANIMÆ', 'COELESTI',
+        'DETUR', 'ARCE', 'EXOPTAT', 'ROGITES', 'LECTOR', 'AMICE', 'DEUM',
+        'EGREGIE', 'SCRIBENS', 'PLANXIT', 'DOCUIT', 'CULTOR', 'CUBAT',
+        'ALANUS', 'DOCTOR', 'QUEM', 'DECET', 'ALMUS', 'HONOR',
+    }
+    words_in_text = set(re.findall(r'[A-ZÀ-Þ]{3,}', text[:200]))
+    if len(words_in_text) >= 2 and words_in_text <= LATIN_FRAGMENT_WORDS:
+        return True
+
+    # Short entries that are mostly ALL CAPS Latin (no lowercase content beyond particles)
+    if len(text) < 100:
+        alpha = re.findall(r'[a-zA-ZÀ-ÿ]+', text)
+        if alpha:
+            upper_words = [w for w in alpha if w[0].isupper() and len(w) > 1]
+            lower_words = [w for w in alpha if w[0].islower() and w not in
+                          {'ou', 'et', 'de', 'du', 'des', 'le', 'la', 'les', 'en', 'a', 'y'}]
+            if not lower_words and len(upper_words) >= 3:
+                # All uppercase, no descriptive content = likely fragment
+                return True
+
     # Detect Latin inscriptions: mostly uppercase with Latin words
     # Only filter if uppercase ratio > 0.8 AND contains Latin indicators
     sample = text[:300]
@@ -721,6 +889,14 @@ def is_false_positive(bio_text):
     if first_word_clean in {'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER'}:
         return True
 
+    # Entries starting with lowercase "ou" (orphaned name continuation)
+    if first_word_clean == 'ou' or first_word == 'ou':
+        return True
+
+    # Entries starting with "E.V." or similar reference markers
+    if re.match(r'^[A-Z]\.[A-Z]\.', text):
+        return True
+
     # Roman numerals alone (not followed by name pattern)
     roman_match = re.match(r'^[IVXLCDM]{2,}(\s|$)', text)
     if roman_match:
@@ -734,6 +910,33 @@ def is_false_positive(bio_text):
 
     # Very short fragments (< 30 chars) with no sentence structure
     if len(text) < 30:
+        return True
+
+    # Entries that don't start with an uppercase name pattern
+    # Real biographies start with "NAME (Prénom)" or "NAME, descriptor"
+    # Fragments start with lowercase words, articles, pronouns, etc.
+    first_50 = text[:50].strip()
+    if first_50 and first_50[0].islower():
+        return True
+
+    # Fragments starting with common sentence starters (not names)
+    FRAGMENT_STARTERS = {
+        'Il', 'Elle', 'Son', 'Sa', 'Ses', 'Les', 'Le', 'La', 'Un', 'Une',
+        'Ce', 'Cette', 'Ces', 'On', 'Nous', 'Des', 'Du', 'En', 'Au',
+        'Après', 'Avant', 'Dans', 'Sous', 'Sur', 'Par', 'Pour', 'Avec',
+        'Parmi', 'Selon',
+    }
+    first_word_text = text.split()[0] if text.split() else ''
+    first_word_text = re.sub(r'[.,;:\(\)\*]', '', first_word_text)
+    if first_word_text in FRAGMENT_STARTERS:
+        return True
+
+    # Entries starting with Roman numerals + punctuation (like "II, n°1176")
+    if re.match(r'^[IVX]+[,.\s]', text) and not re.match(r'^[IVX]+\s*\(', text):
+        return True
+
+    # Entries starting with "L'" followed by lowercase (like "L'auteur nous apprend")
+    if re.match(r"^L'[a-z]", text):
         return True
 
     return False
@@ -760,6 +963,26 @@ def main():
 
     print(f"Biographies segmented: {len(biographies)}")
 
+    # Post-process: merge stub entries (very short, < 60 chars) with next entry
+    # These are header-only fragments where the bio start was detected but the
+    # content ended up in the next segment.
+    merged_bios = []
+    i = 0
+    while i < len(biographies):
+        bio_text, raw_lines = biographies[i]
+        if len(bio_text.strip()) < 60 and i + 1 < len(biographies):
+            # This is a stub - merge with next
+            next_text, next_raw = biographies[i + 1]
+            combined_text = bio_text.strip() + ' ' + next_text.strip()
+            combined_raw = raw_lines + next_raw
+            merged_bios.append((combined_text, combined_raw))
+            i += 2
+        else:
+            merged_bios.append((bio_text, raw_lines))
+            i += 1
+    biographies = merged_bios
+    print(f"After merging stubs: {len(biographies)}")
+
     if os.path.exists(OUTPUT_DIR):
         shutil.rmtree(OUTPUT_DIR)
     os.makedirs(OUTPUT_DIR)
@@ -769,6 +992,13 @@ def main():
     skipped_xrefs = 0
     skipped_false = 0
     filename_counts = {}
+
+    # Pre-process: split merged entries (cross-ref + another bio in one segment)
+    expanded = []
+    for bio_text, raw_lines in biographies:
+        parts = split_merged_entries(bio_text, raw_lines)
+        expanded.extend(parts)
+    biographies = expanded
 
     for bio_text, raw_lines in biographies:
         if is_cross_reference(bio_text):
