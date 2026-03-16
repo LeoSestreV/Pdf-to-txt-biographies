@@ -4,11 +4,11 @@ Extract biographies from scanned PDF volumes of biographical dictionaries.
 
 Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
 and indentation analysis to reliably segment biography entries.
+Automatically detects biography start/end pages unless overridden in config.
 
 Usage:
+    python extract_biographies.py BiographieNationale_Volume1.pdf
     python extract_biographies.py volume1_config.json
-    python extract_biographies.py my_document.pdf --start-page 41 --end-page 469
-    python extract_biographies.py -c config.json --output-dir output/
 """
 
 import argparse
@@ -46,11 +46,17 @@ class ExtractionConfig:
     pdf_path: str = ""
     output_dir: str = "biographies_finales"
     log_file: str = "rapport_final.log"
-    report_title: str = "RAPPORT D'EXTRACTION"
+    report_title: str = ""  # empty → auto-generated from pdf filename
 
     # -- Page range (0-indexed) -----------------------------------------------
-    start_page: int = 0
-    end_page: int | None = None  # None → last page of the document
+    # None → auto-detect from PDF content
+    start_page: int | None = None
+    end_page: int | None = None
+
+    # Keywords that signal end-of-biographies (ERRATA, INDEX, etc.)
+    end_section_keywords: list[str] = field(default_factory=lambda: [
+        "ERRATA", "TABLE DES", "INDEX",
+    ])
 
     # -- Page layout geometry -------------------------------------------------
     header_y: float = 60.0       # lines above this y are headers → skip
@@ -120,9 +126,10 @@ class ExtractionConfig:
                 raw[key] = tuple(raw[key])
         return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
 
-    def resolve_end_page(self, doc_page_count: int) -> int:
-        """Return the effective end page (exclusive)."""
-        return self.end_page if self.end_page is not None else doc_page_count
+    @property
+    def needs_auto_detect(self) -> bool:
+        """True if start or end page must be auto-detected."""
+        return self.start_page is None or self.end_page is None
 
 
 # ── Default word lists (French biographical dictionaries) ────────────────────
@@ -573,15 +580,73 @@ def is_name_continuation(prev_text, curr_text):
     return last_two.lower() in _BASE_NAME_CONTINUATION_PAIRS
 
 
+# ── Automatic page boundary detection ────────────────────────────────────────
+
+
+def detect_boundaries(doc, cfg: ExtractionConfig):
+    """Resolve the first and last biography pages.
+
+    If both start_page and end_page are set in config, use them directly.
+    Otherwise, auto-detect the missing boundary:
+    - Forward scan: finds the first page containing a biography start.
+    - Backward scan: looks for end-section keywords (ERRATA, INDEX, etc.).
+
+    Returns (start_page, end_page) as 0-indexed, end exclusive.
+    """
+    if not cfg.needs_auto_detect:
+        return cfg.start_page, cfg.end_page
+
+    total = len(doc)
+    start = cfg.start_page
+    end = cfg.end_page
+
+    print("  Détection automatique des limites...")
+
+    # Forward scan for start page
+    if start is None:
+        start = 0
+        for i in range(total):
+            page_lines = extract_page_data(doc[i], i, cfg)
+            found = False
+            for j, ld in enumerate(page_lines):
+                next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
+                prev_ld = page_lines[j - 1] if j > 0 else None
+                if is_biography_start(ld, cfg, next_ld, prev_ld):
+                    start = i
+                    print(f"  -> Début détecté : page {i} (PDF {i + 1})")
+                    found = True
+                    break
+            if found:
+                break
+
+    # Backward scan for end page
+    if end is None:
+        end = total
+        keywords_upper = [kw.upper() for kw in cfg.end_section_keywords]
+        found_end = False
+        for i in range(total - 1, start, -1):
+            text = doc[i].get_text("text").upper()
+            if any(kw in text for kw in keywords_upper):
+                end = i
+                found_end = True
+            elif found_end:
+                print(f"  -> Fin détectée : page {end - 1} (PDF {end})")
+                break
+
+        if not found_end:
+            print(f"  -> Aucune section de fin détectée, dernière page: {total}")
+
+    return start, end
+
+
 # ── Collection & segmentation ────────────────────────────────────────────────
 
 
-def collect_bio_starts(doc, cfg: ExtractionConfig):
-    """Scan all biography pages and collect starts, merging split names."""
-    end_page = cfg.resolve_end_page(len(doc))
+def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: int):
+    """Scan biography pages [start_page, end_page) and collect starts."""
 
     all_lines = []
-    for pidx in range(cfg.start_page, end_page):
+    for pidx in range(start_page, end_page):
         for ld in extract_page_data(doc[pidx], pidx, cfg):
             all_lines.append((len(all_lines), pidx, ld))
 
@@ -952,58 +1017,25 @@ def split_merged_entries(bio_text, raw_lines, cfg: ExtractionConfig):
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 
-def build_parser():
-    """Build argument parser."""
-    p = argparse.ArgumentParser(
-        description="Extract biographies from scanned PDF biographical dictionaries.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Examples:\n"
-               "  %(prog)s volume1_config.json\n"
-               "  %(prog)s doc.pdf --start-page 41 --end-page 469\n"
-               "  %(prog)s -c config.json -o output/\n",
-    )
-    p.add_argument(
-        "source",
-        help="PDF file path, or JSON config file (auto-detected by extension)",
-    )
-    p.add_argument("-c", "--config", help="JSON config file (overrides defaults)")
-    p.add_argument("-o", "--output-dir", help="Output directory")
-    p.add_argument("--log-file", help="Log file path")
-    p.add_argument("--start-page", type=int, help="First page (0-indexed)")
-    p.add_argument("--end-page", type=int, help="Last page (exclusive, 0-indexed)")
-    p.add_argument("--report-title", help="Title for the extraction report")
-    return p
+def build_config(source: str) -> ExtractionConfig:
+    """Build ExtractionConfig from a source path (PDF or JSON config).
 
-
-def config_from_args(args) -> ExtractionConfig:
-    """Build ExtractionConfig from parsed CLI arguments.
-
-    Priority: CLI flags > JSON config file > dataclass defaults.
+    Auto-detected by file extension:
+      .json → load config, pdf_path must be inside the JSON
+      .pdf  → use defaults, auto-detect page boundaries
     """
-    source = args.source
-    config_path = args.config
-
-    # Auto-detect: if source is a .json file, treat it as config
     if source.endswith('.json'):
-        config_path = source
-        cfg = ExtractionConfig.from_json(config_path)
-    elif config_path:
-        cfg = ExtractionConfig.from_json(config_path)
-        cfg.pdf_path = source
+        cfg = ExtractionConfig.from_json(source)
     else:
         cfg = ExtractionConfig(pdf_path=source)
 
-    # CLI overrides
-    if args.output_dir is not None:
-        cfg.output_dir = args.output_dir
-    if args.log_file is not None:
-        cfg.log_file = args.log_file
-    if args.start_page is not None:
-        cfg.start_page = args.start_page
-    if args.end_page is not None:
-        cfg.end_page = args.end_page
-    if args.report_title is not None:
-        cfg.report_title = args.report_title
+    if not cfg.pdf_path:
+        raise SystemExit(
+            f"Erreur: pas de pdf_path dans {source}. "
+            "Ajoutez \"pdf_path\": \"mon_fichier.pdf\" dans le JSON."
+        )
+    if not Path(cfg.pdf_path).exists():
+        raise SystemExit(f"Erreur: le fichier {cfg.pdf_path} n'existe pas.")
 
     return cfg
 
@@ -1016,18 +1048,18 @@ def run(cfg: ExtractionConfig):
     pdf_path = Path(cfg.pdf_path)
     output_dir = Path(cfg.output_dir)
     log_file = Path(cfg.log_file)
-    end_page_label = cfg.end_page if cfg.end_page is not None else "end"
 
     print(f"Opening {pdf_path}...")
     doc = fitz.open(str(pdf_path))
-    end_page = cfg.resolve_end_page(len(doc))
     print(f"Total pages: {len(doc)}")
-    print(f"Biography pages: {cfg.start_page + 1} to {end_page}")
+
+    start_page, end_page = detect_boundaries(doc, cfg)
+    print(f"Pages traitées : {start_page + 1} à {end_page}")
 
     words = _build_word_sets(cfg)
 
     print("Extracting text with font metadata...")
-    all_lines, bio_starts = collect_bio_starts(doc, cfg)
+    all_lines, bio_starts = collect_bio_starts(doc, cfg, start_page, end_page)
     print(f"Total text lines extracted: {len(all_lines)}")
     print(f"Biography starts detected: {len(bio_starts)}")
 
@@ -1102,10 +1134,11 @@ def run(cfg: ExtractionConfig):
         written += 1
 
     # Write report
+    title = cfg.report_title or f"RAPPORT D'EXTRACTION - {pdf_path.name}"
     alerts = [e for e in log_entries if "ALERTE" in e]
     report_lines = [
         "=" * 80,
-        cfg.report_title,
+        title,
         "=" * 80,
         "",
         f"Biographies extraites : {written}",
@@ -1131,14 +1164,19 @@ def run(cfg: ExtractionConfig):
 
 
 def main():
-    parser = build_parser()
+    parser = argparse.ArgumentParser(
+        description="Extract biographies from scanned PDF biographical dictionaries.",
+        epilog="Examples:\n"
+               "  %(prog)s BiographieNationale_Volume1.pdf\n"
+               "  %(prog)s volume1_config.json\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "source",
+        help="PDF file or JSON config (auto-detected by extension)",
+    )
     args = parser.parse_args()
-    cfg = config_from_args(args)
-
-    if not cfg.pdf_path:
-        parser.error("No PDF path specified (provide it in the JSON config or as argument)")
-
-    run(cfg)
+    run(build_config(args.source))
 
 
 if __name__ == "__main__":

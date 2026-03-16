@@ -2,7 +2,6 @@
     "pdf_path": "BiographieNationale_Volume1.pdf",
     "output_dir": "biographies_finales",
     "log_file": "rapport_final.log",
-    "report_title": "RAPPORT D'EXTRACTION - BiographieNationale Volume 1",
 
     "start_page": 41,
     "end_page": 469,
