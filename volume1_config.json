@@ -1,0 +1,29 @@
+{
+    "pdf_path": "BiographieNationale_Volume1.pdf",
+    "output_dir": "biographies_finales",
+    "log_file": "rapport_final.log",
+    "report_title": "RAPPORT D'EXTRACTION - BiographieNationale Volume 1",
+
+    "start_page": 41,
+    "end_page": 469,
+
+    "header_y": 60.0,
+    "footer_y": 590.0,
+    "col_boundary": 290.0,
+    "y_merge_tolerance": 2.0,
+    "left_col_indent": [146.0, 165.0],
+    "right_col_indent": [308.0, 330.0],
+
+    "min_bold_name_size": 7.0,
+    "max_attribution_size": 7.5,
+    "footnote_y": 350.0,
+
+    "ocr_fixes": {
+        "ARIVOIIL": "ARNOUL"
+    },
+    "filename_ocr_fixes": {
+        "DETO -LÉDE": "DE TOLÈDE",
+        "DETO-LÉDE": "DE TOLÈDE",
+        "ARIVOIIL": "ARNOUL"
+    }
+}

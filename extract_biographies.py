@@ -1,39 +1,133 @@
 #!/usr/bin/env python3
 """
-Extract biographies from BiographieNationale_Volume1.pdf
+Extract biographies from scanned PDF volumes of biographical dictionaries.
 
 Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
-and indentation analysis to reliably segment biographies.
+and indentation analysis to reliably segment biography entries.
+
+Usage:
+    python extract_biographies.py volume1_config.json
+    python extract_biographies.py my_document.pdf --start-page 41 --end-page 469
+    python extract_biographies.py -c config.json --output-dir output/
 """
 
+import argparse
+import json
 import re
+import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF
 
-# --- Configuration ---
+# ── PyMuPDF font flag bits (library constants, not document-specific) ────────
 
-PDF_PATH = Path("BiographieNationale_Volume1.pdf")
-OUTPUT_DIR = Path("biographies_finales")
-LOG_FILE = Path("rapport_final.log")
+PYMUPDF_BOLD_BIT = 1 << 4
+PYMUPDF_ITALIC_BIT = 1 << 1
 
-BIO_START_PAGE = 41
-BIO_END_PAGE = 469
-HEADER_Y_THRESHOLD = 60.0
-FOOTER_Y_THRESHOLD = 590.0
-COL_BOUNDARY = 290
-Y_MERGE_TOLERANCE = 2.0
-
-# X-position ranges for biography start indentation (alinéa)
-# Left column: body text ~138-143, bio starts ~146-160
-# Right column: body text ~302-307, bio starts ~308-325
-LEFT_COL_INDENT = (146, 165)
-RIGHT_COL_INDENT = (308, 330)
+# ── Uppercase character class for regex (Western European + accented) ────────
 
 UC = r'A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞ'
 
-# Descriptor words that signal end of name / start of biography body
-DESCRIPTORS = frozenset({
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+
+@dataclass
+class ExtractionConfig:
+    """All tunable parameters for biography extraction.
+
+    Every threshold, size, and document-specific value lives here.
+    Defaults match the Biographie Nationale Volume 1 layout.
+    Load per-volume overrides via ``ExtractionConfig.from_json(path)``.
+    """
+
+    # -- Input / Output -------------------------------------------------------
+    pdf_path: str = ""
+    output_dir: str = "biographies_finales"
+    log_file: str = "rapport_final.log"
+    report_title: str = "RAPPORT D'EXTRACTION"
+
+    # -- Page range (0-indexed) -----------------------------------------------
+    start_page: int = 0
+    end_page: int | None = None  # None → last page of the document
+
+    # -- Page layout geometry -------------------------------------------------
+    header_y: float = 60.0       # lines above this y are headers → skip
+    footer_y: float = 590.0      # (reserved for future use)
+    col_boundary: float = 290.0  # x < this → left column
+    y_merge_tolerance: float = 2.0  # merge lines within this y-distance
+    left_col_indent: tuple[float, float] = (146.0, 165.0)   # (min, max)
+    right_col_indent: tuple[float, float] = (308.0, 330.0)
+
+    # -- Font detection thresholds --------------------------------------------
+    min_bold_name_size: float = 7.0   # bold spans must be ≥ this to count
+    max_attribution_size: float = 7.5  # bold < this at page bottom → attribution
+    footnote_y: float = 350.0         # y > this + small font → footnote
+    min_uppercase_ratio: float = 0.5   # fraction of uppercase in bold name
+    min_uppercase_count: int = 2       # minimum uppercase chars in bold name
+
+    # -- Text length thresholds -----------------------------------------------
+    stub_merge_max_chars: int = 60    # stubs shorter → merge with next
+    min_entry_chars: int = 30         # entries shorter → false positive
+    short_entry_chars: int = 100      # for all-caps / latin check
+    alert_min_chars: int = 150        # entries shorter → log alert
+    xref_max_chars: int = 300         # "Voir" entries shorter → cross-ref
+    xref_garbled_max_chars: int = 200  # garbled "Voir" variants
+    latin_sample_chars: int = 300     # sample size for latin detection
+    latin_uppercase_ratio: float = 0.8
+    min_alpha_for_latin: int = 30     # need this many alpha chars to check
+
+    # -- Name extraction ------------------------------------------------------
+    min_name_length: int = 3          # names shorter → rejected
+    max_name_alone_length: int = 50   # name-alone lines longer → not a name
+    max_name_chars: int = 80          # trigger truncation above this
+    max_filename_chars: int = 90      # truncate filenames above this
+    fallback_name_chars: int = 60     # chars from first comma as fallback
+    header_lines_count: int = 5       # how many lines to examine for name
+
+    # -- Merge & split thresholds ---------------------------------------------
+    max_merge_gap_lines: int = 2      # max line gap for name-continuation merge
+    split_part1_min_chars: int = 10   # min size for part1 in voir-split
+    split_part2_min_chars: int = 50   # min size for part2 in voir-split
+    author_attrib_max_size: int = 100  # max chars for author-attribution fp
+
+    # -- Document-specific OCR corrections ------------------------------------
+    ocr_fixes: dict[str, str] = field(default_factory=lambda: {
+        'ARIVOIIL': 'ARNOUL',
+    })
+    filename_ocr_fixes: dict[str, str] = field(default_factory=lambda: {
+        'DETO -LÉDE': 'DE TOLÈDE',
+        'DETO-LÉDE': 'DE TOLÈDE',
+        'ARIVOIIL': 'ARNOUL',
+    })
+
+    # -- Extensible word lists ------------------------------------------------
+    # These extend (not replace) the built-in French defaults.
+    extra_descriptors: list[str] = field(default_factory=list)
+    extra_blacklisted_starts: list[str] = field(default_factory=list)
+    extra_fragment_starters: list[str] = field(default_factory=list)
+    extra_latin_fragments: list[str] = field(default_factory=list)
+    extra_latin_indicators: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> "ExtractionConfig":
+        """Load configuration from a JSON file.  Missing keys use defaults."""
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        # Convert list → tuple for indent ranges
+        for key in ("left_col_indent", "right_col_indent"):
+            if key in raw and isinstance(raw[key], list):
+                raw[key] = tuple(raw[key])
+        return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
+
+    def resolve_end_page(self, doc_page_count: int) -> int:
+        """Return the effective end page (exclusive)."""
+        return self.end_page if self.end_page is not None else doc_page_count
+
+
+# ── Default word lists (French biographical dictionaries) ────────────────────
+
+_BASE_DESCRIPTORS = frozenset({
     'abbé', 'abbesse', 'administrateur', 'agronome', 'amiral', 'ancien',
     'annaliste', 'antiquaire', 'apôtre', 'architecte', 'archéologue',
     'arrière', 'artisan', 'artiste', 'artistes', 'astronome', 'auteur',
@@ -86,26 +180,28 @@ DESCRIPTORS = frozenset({
     'soixantième', 'soixante',
 })
 
-NAME_PARTICLES = frozenset({
+_BASE_NAME_PARTICLES = frozenset({
     'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'VAN', 'DEN', 'DER',
     'VANDER', 'VANDEN', 'OU', 'ET', 'D', 'VON', 'VER', 'TER',
 })
 
-NAME_LINKS = frozenset({'ou', 'dit', 'dite', 'surnommé', 'nommé', 'appelé', 'appelée'})
+_BASE_NAME_LINKS = frozenset({
+    'ou', 'dit', 'dite', 'surnommé', 'nommé', 'appelé', 'appelée',
+})
 
-FRAGMENT_STARTERS = frozenset({
+_BASE_FRAGMENT_STARTERS = frozenset({
     'Il', 'Elle', 'Son', 'Sa', 'Ses', 'Les', 'Le', 'La', 'Un', 'Une',
     'Ce', 'Cette', 'Ces', 'On', 'Nous', 'Des', 'Du', 'En', 'Au',
     'Après', 'Avant', 'Dans', 'Sous', 'Sur', 'Par', 'Pour', 'Avec',
     'Parmi', 'Selon',
 })
 
-BLACKLISTED_STARTS = frozenset({
+_BASE_BLACKLISTED_STARTS = frozenset({
     'IDEM', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
     'HIC', 'LIBER', 'HUJUS', 'DIXIT',
 })
 
-LATIN_FRAGMENT_WORDS = frozenset({
+_BASE_LATIN_FRAGMENT_WORDS = frozenset({
     'INCLYTA', 'GESTA', 'CECINIT', 'TRIUMPHOS', 'NATURASI', 'MORES',
     'MYSTICA', 'VERBA', 'DEI', 'ARTES', 'DEPINGENS', 'MILITIAMQUE',
     'POLI', 'ELOQUII', 'PICTOR', 'HORUM', 'CENSOR', 'CYTIIARISTA',
@@ -115,24 +211,24 @@ LATIN_FRAGMENT_WORDS = frozenset({
     'ALANUS', 'DOCTOR', 'QUEM', 'DECET', 'ALMUS', 'HONOR',
 })
 
-LATIN_INDICATORS = frozenset({
+_BASE_LATIN_INDICATORS = frozenset({
     'ET', 'QUI', 'QUOD', 'HIC', 'EST', 'FUIT', 'OBIIT',
     'ANNO', 'DOMINI', 'JACET', 'CUBAT', 'HUJUS', 'POST',
     'DIXIT', 'PONDUS', 'DOCUIT', 'CULTOR', 'FILIT',
 })
 
-STANDALONE_PARTICLES = frozenset({
+_BASE_STANDALONE_PARTICLES = frozenset({
     'VAN', 'DE', 'DU', 'DES', 'LE', 'LA', 'LES', 'DEN', 'DER',
 })
 
-SPACED_PARTICLES = [
+_BASE_SPACED_PARTICLES = [
     (r'\bD E S\b', 'DES'), (r'\bD E N\b', 'DEN'), (r'\bD E R\b', 'DER'),
     (r'\bV A N\b', 'VAN'), (r'\bV O N\b', 'VON'), (r'\bL E S\b', 'LES'),
     (r'\bD E\b', 'DE'), (r'\bD U\b', 'DU'),
     (r'\bL E\b', 'LE'), (r'\bL A\b', 'LA'),
 ]
 
-TRAILING_PATTERNS = [
+_BASE_TRAILING_PATTERNS = [
     r',?\s+dont\s+.*$',
     r',?\s+communément\s*$',
     r',?\s+mais\s*$',
@@ -142,13 +238,28 @@ TRAILING_PATTERNS = [
     r',?\s+aussi\b.*$',
 ]
 
-OCR_FIXES = {
-    'DETO -LÉDE': 'DE TOLÈDE',
-    'DETO-LÉDE': 'DE TOLÈDE',
-    'ARIVOIIL': 'ARNOUL',
-}
+_BASE_FRENCH_STOP_WORDS = frozenset({
+    'ou', 'et', 'de', 'du', 'des', 'le', 'la', 'les', 'en', 'a', 'y',
+})
 
-# --- Page data extraction ---
+_BASE_NAME_CONTINUATION_PAIRS = frozenset({
+    'ou le', 'ou la', 'ou les', 'ou l', 'dit le', 'dit la',
+    'dite la', 'dite le', 'nommé le', 'nommé la',
+})
+
+
+def _build_word_sets(cfg: ExtractionConfig):
+    """Build effective word sets by merging base sets with config extras."""
+    return {
+        'descriptors': _BASE_DESCRIPTORS | frozenset(cfg.extra_descriptors),
+        'blacklisted': _BASE_BLACKLISTED_STARTS | frozenset(cfg.extra_blacklisted_starts),
+        'fragment_starters': _BASE_FRAGMENT_STARTERS | frozenset(cfg.extra_fragment_starters),
+        'latin_fragments': _BASE_LATIN_FRAGMENT_WORDS | frozenset(cfg.extra_latin_fragments),
+        'latin_indicators': _BASE_LATIN_INDICATORS | frozenset(cfg.extra_latin_indicators),
+    }
+
+
+# ── Page data extraction ────────────────────────────────────────────────────
 
 
 def _extract_spans(line):
@@ -156,8 +267,8 @@ def _extract_spans(line):
     return [
         {
             'text': s['text'],
-            'bold': bool(s['flags'] & (1 << 4)),
-            'italic': bool(s['flags'] & (1 << 1)),
+            'bold': bool(s['flags'] & PYMUPDF_BOLD_BIT),
+            'italic': bool(s['flags'] & PYMUPDF_ITALIC_BIT),
             'size': s['size'],
             'font': s['font'],
         }
@@ -168,7 +279,6 @@ def _extract_spans(line):
 
 def _merge_span_groups(groups):
     """Merge grouped span lists into final line data objects."""
-    # Sort: left column first (by y), then right column (by y)
     groups.sort(key=lambda g: (0 if g[3] else 1, g[0], g[1]))
 
     lines_data = []
@@ -194,15 +304,15 @@ def _merge_span_groups(groups):
             'spans': merged_spans,
             'full_text': full_text,
             'has_bold_start': merged_spans[0]['bold'] if merged_spans else False,
-            'page': 0,  # set by caller
+            'page': 0,
         })
     return lines_data
 
 
-def extract_page_data(page, page_idx):
+def extract_page_data(page, page_idx, cfg: ExtractionConfig):
     """Extract text spans with metadata from a page.
 
-    Merges line objects that share the same y-position (within 2px tolerance)
+    Merges line objects that share the same y-position (within tolerance)
     into a single logical line, sorted by x-position.
     """
     raw_lines = []
@@ -211,7 +321,7 @@ def extract_page_data(page, page_idx):
             continue
         for line in b['lines']:
             y_top = line['bbox'][1]
-            if y_top < HEADER_Y_THRESHOLD:
+            if y_top < cfg.header_y:
                 continue
             spans = _extract_spans(line)
             if spans:
@@ -219,13 +329,12 @@ def extract_page_data(page, page_idx):
 
     raw_lines.sort(key=lambda t: (t[0], t[1]))
 
-    # Group lines within 2px y tolerance and same column
     groups = []
     for y, x, spans in raw_lines:
-        is_left = x < COL_BOUNDARY
+        is_left = x < cfg.col_boundary
         merged = False
         for g in groups:
-            if abs(y - g[0]) <= Y_MERGE_TOLERANCE and is_left == g[3]:
+            if abs(y - g[0]) <= cfg.y_merge_tolerance and is_left == g[3]:
                 g[2].append((x, spans))
                 g[0] = min(g[0], y)
                 g[1] = min(g[1], x)
@@ -240,7 +349,7 @@ def extract_page_data(page, page_idx):
     return lines_data
 
 
-# --- Detection helpers ---
+# ── Detection helpers ────────────────────────────────────────────────────────
 
 
 def get_first_real_span(spans):
@@ -252,33 +361,33 @@ def get_first_real_span(spans):
     return spans[0] if spans else None
 
 
-def is_indented_for_bio(x):
+def is_indented_for_bio(x, cfg: ExtractionConfig):
     """Check if x-position corresponds to biography start indentation."""
-    lo, hi = LEFT_COL_INDENT if x < COL_BOUNDARY else RIGHT_COL_INDENT
+    lo, hi = cfg.left_col_indent if x < cfg.col_boundary else cfg.right_col_indent
     return lo <= x <= hi
 
 
-def has_name_pattern(text):
+def has_name_pattern(text, cfg: ExtractionConfig):
     """Check if text starts with an uppercase name followed by ( or , or 'ou'."""
     text = re.sub(r'^\*\s*', '', text).strip()
     if re.match(rf'^[{UC}][{UC}\s\-\'\.]+\s*(\(|,|ou\s)', text):
         name_part = re.split(r'[,(]', text)[0].strip()
         name_clean = re.sub(r'[\s\-\'\.]+', '', name_part)
-        if len(name_clean) >= 3 and not re.match(r'^[IVXLCDM]+$', name_clean):
+        if (len(name_clean) >= cfg.min_name_length and
+                not re.match(r'^[IVXLCDM]+$', name_clean)):
             return True
     return False
 
 
-# --- Biography start detection ---
+# ── Biography start detection ────────────────────────────────────────────────
 
 
-def _check_bold_name(spans, first, full, y, next_line_data):
+def _check_bold_name(spans, first, full, y, next_line_data, cfg: ExtractionConfig):
     """Method 1: Bold uppercase name detection.
 
-    Returns True (is bio start), False (definitely not — block further methods),
-    or None (not matched, try other methods).
+    Returns True (is bio start), False (definitely not), or None (inconclusive).
     """
-    if not (first['bold'] and first['size'] >= 7.0):
+    if not (first['bold'] and first['size'] >= cfg.min_bold_name_size):
         return None
 
     bold_parts = []
@@ -293,17 +402,20 @@ def _check_bold_name(spans, first, full, y, next_line_data):
     if not name_clean:
         return False
     upper_count = sum(1 for c in name_clean if c.isupper())
-    if len(name_clean) == 0 or upper_count / len(name_clean) < 0.5 or upper_count < 2:
+    if (len(name_clean) == 0 or
+            upper_count / len(name_clean) < cfg.min_uppercase_ratio or
+            upper_count < cfg.min_uppercase_count):
         return None
 
     rest = full[len(bold_name):].strip()
     if bold_name.rstrip().endswith('('):
         rest = '(' + rest
 
-    if first['size'] < 7.0 and y > 350:
+    if first['size'] < cfg.min_bold_name_size and y > cfg.footnote_y:
         return False
 
-    if re.match(r'^[A-Z][a-z]*[\.\-]\s*[A-Z]', bold_name) and first['size'] < 7.5:
+    if (re.match(r'^[A-Z][a-z]*[\.\-]\s*[A-Z]', bold_name) and
+            first['size'] < cfg.max_attribution_size):
         return False
 
     has_comma = ',' in bold_name
@@ -341,9 +453,9 @@ def _check_spaced_smallcaps(first, full, next_line_data):
     return False
 
 
-def _check_indented_italic(x, spans):
+def _check_indented_italic(x, spans, cfg: ExtractionConfig):
     """Method 4: Indented UPPERCASE + italic prénom pattern."""
-    if not (is_indented_for_bio(x) and len(spans) >= 2):
+    if not (is_indented_for_bio(x, cfg) and len(spans) >= 2):
         return False
 
     first_real = get_first_real_span(spans)
@@ -353,7 +465,7 @@ def _check_indented_italic(x, spans):
     ft = first_real['text'].strip().lstrip('*').strip()
     ft_name = re.sub(r'\s*\(\s*$', '', ft).strip()
     if not (re.match(rf'^[{UC}][{UC}\-\' ]+$', ft_name) and
-            len(ft_name) >= 3 and
+            len(ft_name) >= cfg.min_name_length and
             not re.match(r'^[IVXLCDM\s]+$', ft_name)):
         return False
 
@@ -369,11 +481,11 @@ def _check_indented_italic(x, spans):
     return False
 
 
-def _check_name_alone(full, next_line_data):
+def _check_name_alone(full, next_line_data, cfg: ExtractionConfig):
     """Method 5: Name alone on a line, next line starts with ( or ,."""
     full_stripped = full.replace('*', '').strip()
     if not (re.match(rf'^[{UC}][{UC}\s\-\'\.]+$', full_stripped) and
-            3 <= len(full_stripped) <= 50 and
+            cfg.min_name_length <= len(full_stripped) <= cfg.max_name_alone_length and
             not re.match(r'^[IVXLCDM\s]+$', full_stripped)):
         return False
 
@@ -384,9 +496,9 @@ def _check_name_alone(full, next_line_data):
             bool(re.match(r'^\([^)]+\)', next_full)))
 
 
-def _check_after_attribution(full, prev_line_data):
+def _check_after_attribution(full, prev_line_data, cfg: ExtractionConfig):
     """Method 6: Name pattern preceded by author attribution."""
-    if not (prev_line_data and has_name_pattern(full)):
+    if not (prev_line_data and has_name_pattern(full, cfg)):
         return False
 
     prev_full = prev_line_data['full_text'].strip()
@@ -395,27 +507,22 @@ def _check_after_attribution(full, prev_line_data):
     if not prev_full.endswith('.'):
         return False
 
-    # Check last bold spans for attribution size
     last_bold_spans = [s for s in prev_spans if s['bold'] and s['text'].strip()]
-    if last_bold_spans and max(s['size'] for s in last_bold_spans) < 7.5:
+    if last_bold_spans and max(s['size'] for s in last_bold_spans) < cfg.max_attribution_size:
         return True
 
-    # Initials-like ending: "Ad. Siret." or "F.-J. Fétis."
     if re.search(r'[A-Z][a-z]*[\.\-]\s*[A-Z][a-zà-ÿ]+\.\s*$', prev_full):
         return True
-
-    # OCR-garbled attributions
     if re.search(r'[A-Z][a-z]*\.\s*[a-z]+[«»]+\.\s*$', prev_full):
         return True
-
-    # "Voir X." cross-reference
     if re.search(r'\bVoir\b.*\.\s*$', prev_full):
         return True
 
     return False
 
 
-def is_biography_start(line_data, next_line_data=None, prev_line_data=None):
+def is_biography_start(line_data, cfg: ExtractionConfig,
+                       next_line_data=None, prev_line_data=None):
     """Detect if a line is the start of a new biography entry."""
     spans = line_data['spans']
     full = line_data['full_text']
@@ -429,33 +536,33 @@ def is_biography_start(line_data, next_line_data=None, prev_line_data=None):
     if not first:
         return False
 
-    bold_result = _check_bold_name(spans, first, full, y, next_line_data)
+    bold_result = _check_bold_name(spans, first, full, y, next_line_data, cfg)
     if bold_result is True:
         return True
     if bold_result is False:
         return False
     if _check_spaced_smallcaps(first, full, next_line_data):
         return True
-    if is_indented_for_bio(x) and has_name_pattern(full):
+    if is_indented_for_bio(x, cfg) and has_name_pattern(full, cfg):
         return True
-    if _check_indented_italic(x, spans):
+    if _check_indented_italic(x, spans, cfg):
         return True
-    if _check_name_alone(full, next_line_data):
+    if _check_name_alone(full, next_line_data, cfg):
         return True
-    if _check_after_attribution(full, prev_line_data):
+    if _check_after_attribution(full, prev_line_data, cfg):
         return True
 
     return False
 
 
-# --- Name continuation & merging ---
+# ── Name continuation & merging ──────────────────────────────────────────────
 
 
 def is_name_continuation(prev_text, curr_text):
     """Check if curr_text continues the name started in prev_text."""
     prev = prev_text.strip()
     last_word = prev.rstrip('.,;:').split()[-1] if prev.split() else ''
-    if last_word.upper() in NAME_PARTICLES:
+    if last_word.upper() in _BASE_NAME_PARTICLES:
         return True
     if prev.rstrip().endswith("D'") or prev.rstrip().endswith("d'"):
         return True
@@ -463,27 +570,26 @@ def is_name_continuation(prev_text, curr_text):
         return True
 
     last_two = ' '.join(prev.rstrip('.,;:').split()[-2:]) if len(prev.split()) >= 2 else ''
-    return last_two.lower() in (
-        'ou le', 'ou la', 'ou les', 'ou l', 'dit le', 'dit la',
-        'dite la', 'dite le', 'nommé le', 'nommé la',
-    )
+    return last_two.lower() in _BASE_NAME_CONTINUATION_PAIRS
 
 
-# --- Collection & segmentation ---
+# ── Collection & segmentation ────────────────────────────────────────────────
 
 
-def collect_bio_starts(doc):
+def collect_bio_starts(doc, cfg: ExtractionConfig):
     """Scan all biography pages and collect starts, merging split names."""
+    end_page = cfg.resolve_end_page(len(doc))
+
     all_lines = []
-    for pidx in range(BIO_START_PAGE, BIO_END_PAGE):
-        for ld in extract_page_data(doc[pidx], pidx):
+    for pidx in range(cfg.start_page, end_page):
+        for ld in extract_page_data(doc[pidx], pidx, cfg):
             all_lines.append((len(all_lines), pidx, ld))
 
     bio_starts = []
     for i, (gidx, pidx, ld) in enumerate(all_lines):
         next_ld = all_lines[i + 1][2] if i + 1 < len(all_lines) else None
         prev_ld = all_lines[i - 1][2] if i > 0 else None
-        if is_biography_start(ld, next_ld, prev_ld):
+        if is_biography_start(ld, cfg, next_ld, prev_ld):
             bio_starts.append((gidx, pidx, ld))
 
     # Post-process 1: Remove false starts caused by hyphenation
@@ -493,7 +599,7 @@ def collect_bio_starts(doc):
                                        all_lines[gidx - 1][2]['full_text'].rstrip())
     ]
 
-    # Post-process 2: Merge when gap is 1-2 lines and previous line ends with name particle
+    # Post-process 2: Merge when gap ≤ max_merge_gap_lines and prev ends with particle
     merged = []
     skip_next = False
     for i, (gidx, pidx, ld) in enumerate(bio_starts):
@@ -506,7 +612,7 @@ def collect_bio_starts(doc):
             next_ld = bio_starts[i + 1][2]
             gap = next_gidx - gidx
 
-            if gap <= 2:
+            if gap <= cfg.max_merge_gap_lines:
                 between_text = ' '.join(
                     all_lines[j][2]['full_text']
                     for j in range(gidx, next_gidx) if j < len(all_lines)
@@ -530,7 +636,7 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
     ]
 
 
-# --- Text cleaning ---
+# ── Text cleaning ────────────────────────────────────────────────────────────
 
 
 def collapse_spaced_names(text):
@@ -546,18 +652,16 @@ def collapse_spaced_names(text):
     )
 
 
-def clean_biography_text(raw_lines):
+def clean_biography_text(raw_lines, cfg: ExtractionConfig):
     """Clean biography text into continuous flowing text."""
     text = collapse_spaced_names('\n'.join(raw_lines))
 
-    # Dehyphenate words split across lines
     text = re.sub(
         r'(\w)-\n(\w)',
         lambda m: m.group(1) + m.group(2) if m.group(2)[0].islower() else m.group(0),
         text
     )
 
-    # Join all lines, strip, collapse whitespace
     parts = []
     for line in text.split('\n'):
         line = line.strip()
@@ -567,18 +671,19 @@ def clean_biography_text(raw_lines):
             parts.append(line)
 
     text = re.sub(r'[ \t]+', ' ', ''.join(parts)).strip()
-    text = text.replace('ARIVOIIL', 'ARNOUL')
+    for old, new in cfg.ocr_fixes.items():
+        text = text.replace(old, new)
     return text
 
 
-# --- Name extraction ---
+# ── Name extraction ──────────────────────────────────────────────────────────
 
 
-def _join_header_lines(raw_lines):
+def _join_header_lines(raw_lines, cfg: ExtractionConfig):
     """Join first few lines handling hyphenation for name extraction."""
     header_lines = [
         collapse_spaced_names(line.strip())
-        for line in raw_lines[:5]
+        for line in raw_lines[:cfg.header_lines_count]
         if line.strip()
     ]
     if not header_lines:
@@ -601,8 +706,9 @@ def _join_header_lines(raw_lines):
     return re.sub(r'^\*\s*', '', joined).strip()
 
 
-def _find_name_end(joined):
+def _find_name_end(joined, words: dict):
     """Find the end position of the name in the joined header text."""
+    descriptors = words['descriptors']
     paren_depth = 0
     i = 0
     while i < len(joined):
@@ -633,13 +739,13 @@ def _find_name_end(joined):
                     r'[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþé]+', joined[i:])
                 if word_match:
                     word = word_match.group(0)
-                    if word in DESCRIPTORS:
+                    if word in descriptors:
                         pos = i
                         while pos > 0 and joined[pos - 1] in ' ,':
                             pos -= 1
                         return pos
                     if joined[i - 1] == ')' or (i > 1 and ')' in joined[max(0, i - 5):i]):
-                        if word not in NAME_LINKS:
+                        if word not in _BASE_NAME_LINKS:
                             pos = i
                             while pos > 0 and joined[pos - 1] in ' ,':
                                 pos -= 1
@@ -649,19 +755,18 @@ def _find_name_end(joined):
     return len(joined)
 
 
-def extract_name_from_lines(raw_lines):
+def extract_name_from_lines(raw_lines, cfg: ExtractionConfig, words: dict):
     """Extract the biography name from raw lines."""
-    joined = _join_header_lines(raw_lines)
+    joined = _join_header_lines(raw_lines, cfg)
     if not joined:
         return ''
 
-    name_end = _find_name_end(joined)
+    name_end = _find_name_end(joined, words)
     name = joined[:name_end].strip().rstrip(',').strip()
 
-    # Truncate overly long names at a reasonable point
-    if len(name) > 80:
+    if len(name) > cfg.max_name_chars:
         paren_end = name.find(')')
-        if 0 < paren_end < 80:
+        if 0 < paren_end < cfg.max_name_chars:
             rest = name[paren_end + 1:].strip()
             if rest and re.match(r'^(,\s*)?(ou\s|dit\s|dite\s|OU\s)', rest):
                 second_paren = rest.find(')')
@@ -675,29 +780,28 @@ def extract_name_from_lines(raw_lines):
     return name
 
 
-# --- Filename & OCR cleanup ---
+# ── Filename & OCR cleanup ──────────────────────────────────────────────────
 
 
-def fix_ocr_spacing(name):
+def fix_ocr_spacing(name, cfg: ExtractionConfig):
     """Fix OCR artifacts that insert spaces within words."""
     def collapse_spaced_word(m):
         return m.group(0).replace(' ', '')
 
-    # Collapse 3+ spaced uppercase letters
     name = re.sub(
         r'(?<![A-ZÀ-Þa-zà-ÿ])(?:[A-ZÀ-Þ] ){2,}[A-ZÀ-Þ](?![A-ZÀ-Þa-zà-ÿ])',
         collapse_spaced_word, name
     )
 
-    for pattern, fixed in SPACED_PARTICLES:
+    for pattern, fixed in _BASE_SPACED_PARTICLES:
         name = re.sub(pattern, fixed, name)
 
-    name = re.sub(r'\xad\s*', '', name)  # soft hyphen
+    name = re.sub(r'\xad\s*', '', name)
     name = re.sub(r'\s+\)', ')', name)
     name = re.sub(r'\(\s+', '(', name)
     name = re.sub(r'\s+,', ',', name)
 
-    for old, new in OCR_FIXES.items():
+    for old, new in cfg.filename_ocr_fixes.items():
         name = name.replace(old, new)
 
     return name
@@ -705,7 +809,7 @@ def fix_ocr_spacing(name):
 
 def clean_filename_trailing(name):
     """Remove trailing incomplete phrases from filenames."""
-    for pat in TRAILING_PATTERNS:
+    for pat in _BASE_TRAILING_PATTERNS:
         name = re.sub(pat, '', name, flags=re.IGNORECASE)
 
     name = re.sub(
@@ -720,71 +824,69 @@ def clean_filename_trailing(name):
     return name.strip()
 
 
-def extract_filename(bio_text, raw_lines):
+def extract_filename(bio_text, raw_lines, cfg: ExtractionConfig, words: dict):
     """Extract filesystem-safe filename from biography text."""
-    name = extract_name_from_lines(raw_lines) or bio_text.split(',')[0].strip()[:60]
+    name = (extract_name_from_lines(raw_lines, cfg, words) or
+            bio_text.split(',')[0].strip()[:cfg.fallback_name_chars])
     name = name.rstrip('.')
-    name = fix_ocr_spacing(name)
+    name = fix_ocr_spacing(name, cfg)
     name = clean_filename_trailing(name)
     name = re.sub(r'[\\/:*?"<>|]', '_', name)
     name = re.sub(r'\s+', ' ', name).strip()
-    if len(name) > 90:
-        name = name[:90].rstrip()
+    if len(name) > cfg.max_filename_chars:
+        name = name[:cfg.max_filename_chars].rstrip()
     return (name or 'UNKNOWN') + '.txt'
 
 
-# --- Entry classification ---
+# ── Entry classification ────────────────────────────────────────────────────
 
 
-def is_cross_reference(bio_text):
+def is_cross_reference(bio_text, cfg: ExtractionConfig):
     """Check if entry is just a 'Voir X' redirect."""
     text = bio_text.strip()
-    if len(text) < 300 and re.search(r'\bVoir\b', text):
+    if len(text) < cfg.xref_max_chars and re.search(r'\bVoir\b', text):
         return True
-    if len(text) < 200 and re.search(r'\bVoir[A-Z]', text):
+    if len(text) < cfg.xref_garbled_max_chars and re.search(r'\bVoir[A-Z]', text):
         return True
-    if len(text) < 200 and re.search(r'\bVO[A-Z]{3,}', text):
+    if len(text) < cfg.xref_garbled_max_chars and re.search(r'\bVO[A-Z]{3,}', text):
         return True
     return False
 
 
-def is_false_positive(bio_text):
+def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
     """Detect fragments, footnotes, and non-biography entries."""
     text = bio_text.strip()
     first_word = text.split()[0] if text.split() else ''
     first_word = re.sub(r'^\*\s*', '', first_word)
     first_word_clean = re.sub(r'[.,;:\(\)]', '', first_word)
 
-    if first_word_clean in BLACKLISTED_STARTS:
+    if first_word_clean in words['blacklisted']:
         return True
 
     if text.startswith('D. O. M.') or text.startswith('ET DAME'):
         return True
 
-    # Latin verse fragments
-    words_in_text = set(re.findall(r'[A-ZÀ-Þ]{3,}', text[:200]))
-    if len(words_in_text) >= 2 and words_in_text <= LATIN_FRAGMENT_WORDS:
+    words_in_text = set(re.findall(r'[A-ZÀ-Þ]{3,}', text[:cfg.xref_garbled_max_chars]))
+    if len(words_in_text) >= 2 and words_in_text <= words['latin_fragments']:
         return True
 
-    # Short all-uppercase entries with no descriptive content
-    if len(text) < 100:
+    if len(text) < cfg.short_entry_chars:
         alpha = re.findall(r'[a-zA-ZÀ-ÿ]+', text)
         if alpha:
             upper_words = [w for w in alpha if w[0].isupper() and len(w) > 1]
-            lower_words = [w for w in alpha if w[0].islower() and w not in
-                          {'ou', 'et', 'de', 'du', 'des', 'le', 'la', 'les', 'en', 'a', 'y'}]
+            lower_words = [w for w in alpha if w[0].islower() and
+                          w not in _BASE_FRENCH_STOP_WORDS]
             if not lower_words and len(upper_words) >= 3:
                 return True
 
-    # Latin inscriptions: >80% uppercase with Latin indicators
-    sample = text[:300]
+    sample = text[:cfg.latin_sample_chars]
     upper_chars = sum(1 for c in sample if c.isupper())
     alpha_chars = sum(1 for c in sample if c.isalpha())
-    if alpha_chars > 30 and upper_chars / alpha_chars > 0.8:
-        if set(re.findall(r'[A-Z]{2,}', sample)) & LATIN_INDICATORS:
+    if alpha_chars > cfg.min_alpha_for_latin and upper_chars / alpha_chars > cfg.latin_uppercase_ratio:
+        if set(re.findall(r'[A-Z]{2,}', sample)) & words['latin_indicators']:
             return True
 
-    if first_word_clean in STANDALONE_PARTICLES:
+    if first_word_clean in _BASE_STANDALONE_PARTICLES:
         return True
     if first_word_clean == 'ou' or first_word == 'ou':
         return True
@@ -797,9 +899,10 @@ def is_false_positive(bio_text):
         if not rest.startswith('(') and not rest.startswith(','):
             return True
 
-    if re.match(r'^[A-Z][\.\-][A-Z]?[\.\-]\s*[A-Z][a-z]+', text) and len(text) < 100:
+    if (re.match(r'^[A-Z][\.\-][A-Z]?[\.\-]\s*[A-Z][a-z]+', text) and
+            len(text) < cfg.author_attrib_max_size):
         return True
-    if len(text) < 30:
+    if len(text) < cfg.min_entry_chars:
         return True
 
     first_50 = text[:50].strip()
@@ -807,7 +910,7 @@ def is_false_positive(bio_text):
         return True
 
     first_word_text = re.sub(r'[.,;:\(\)\*]', '', text.split()[0]) if text.split() else ''
-    if first_word_text in FRAGMENT_STARTERS:
+    if first_word_text in words['fragment_starters']:
         return True
 
     if re.match(r'^[IVX]+[,.\s]', text) and not re.match(r'^[IVX]+\s*\(', text):
@@ -818,7 +921,7 @@ def is_false_positive(bio_text):
     return False
 
 
-def split_merged_entries(bio_text, raw_lines):
+def split_merged_entries(bio_text, raw_lines, cfg: ExtractionConfig):
     """Split a bio containing a cross-reference followed by another biography."""
     text = bio_text.strip()
 
@@ -837,7 +940,7 @@ def split_merged_entries(bio_text, raw_lines):
     if voir_match:
         split_pos = voir_match.start(1)
         part1, part2 = text[:split_pos].strip(), text[split_pos:].strip()
-        if len(part1) > 10 and len(part2) > 50:
+        if len(part1) > cfg.split_part1_min_chars and len(part2) > cfg.split_part2_min_chars:
             return [
                 (part1, raw_lines[:1]),
                 (part2, [part2[:200]]),
@@ -846,17 +949,85 @@ def split_merged_entries(bio_text, raw_lines):
     return [(bio_text, raw_lines)]
 
 
-# --- Main pipeline ---
+# ── CLI ──────────────────────────────────────────────────────────────────────
 
 
-def main():
-    print(f"Opening {PDF_PATH}...")
-    doc = fitz.open(str(PDF_PATH))
+def build_parser():
+    """Build argument parser."""
+    p = argparse.ArgumentParser(
+        description="Extract biographies from scanned PDF biographical dictionaries.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n"
+               "  %(prog)s volume1_config.json\n"
+               "  %(prog)s doc.pdf --start-page 41 --end-page 469\n"
+               "  %(prog)s -c config.json -o output/\n",
+    )
+    p.add_argument(
+        "source",
+        help="PDF file path, or JSON config file (auto-detected by extension)",
+    )
+    p.add_argument("-c", "--config", help="JSON config file (overrides defaults)")
+    p.add_argument("-o", "--output-dir", help="Output directory")
+    p.add_argument("--log-file", help="Log file path")
+    p.add_argument("--start-page", type=int, help="First page (0-indexed)")
+    p.add_argument("--end-page", type=int, help="Last page (exclusive, 0-indexed)")
+    p.add_argument("--report-title", help="Title for the extraction report")
+    return p
+
+
+def config_from_args(args) -> ExtractionConfig:
+    """Build ExtractionConfig from parsed CLI arguments.
+
+    Priority: CLI flags > JSON config file > dataclass defaults.
+    """
+    source = args.source
+    config_path = args.config
+
+    # Auto-detect: if source is a .json file, treat it as config
+    if source.endswith('.json'):
+        config_path = source
+        cfg = ExtractionConfig.from_json(config_path)
+    elif config_path:
+        cfg = ExtractionConfig.from_json(config_path)
+        cfg.pdf_path = source
+    else:
+        cfg = ExtractionConfig(pdf_path=source)
+
+    # CLI overrides
+    if args.output_dir is not None:
+        cfg.output_dir = args.output_dir
+    if args.log_file is not None:
+        cfg.log_file = args.log_file
+    if args.start_page is not None:
+        cfg.start_page = args.start_page
+    if args.end_page is not None:
+        cfg.end_page = args.end_page
+    if args.report_title is not None:
+        cfg.report_title = args.report_title
+
+    return cfg
+
+
+# ── Main pipeline ────────────────────────────────────────────────────────────
+
+
+def run(cfg: ExtractionConfig):
+    """Run the full extraction pipeline with the given configuration."""
+    pdf_path = Path(cfg.pdf_path)
+    output_dir = Path(cfg.output_dir)
+    log_file = Path(cfg.log_file)
+    end_page_label = cfg.end_page if cfg.end_page is not None else "end"
+
+    print(f"Opening {pdf_path}...")
+    doc = fitz.open(str(pdf_path))
+    end_page = cfg.resolve_end_page(len(doc))
     print(f"Total pages: {len(doc)}")
-    print(f"Biography pages: {BIO_START_PAGE + 1} to {BIO_END_PAGE}")
+    print(f"Biography pages: {cfg.start_page + 1} to {end_page}")
+
+    words = _build_word_sets(cfg)
 
     print("Extracting text with font metadata...")
-    all_lines, bio_starts = collect_bio_starts(doc)
+    all_lines, bio_starts = collect_bio_starts(doc, cfg)
     print(f"Total text lines extracted: {len(all_lines)}")
     print(f"Biography starts detected: {len(bio_starts)}")
 
@@ -865,16 +1036,16 @@ def main():
     for i, (gidx, pidx, ld) in enumerate(bio_starts):
         end_gidx = bio_starts[i + 1][0] if i + 1 < len(bio_starts) else len(all_lines)
         raw_lines = extract_bio_text(all_lines, gidx, end_gidx)
-        biographies.append((clean_biography_text(raw_lines), raw_lines))
+        biographies.append((clean_biography_text(raw_lines, cfg), raw_lines))
 
     print(f"Biographies segmented: {len(biographies)}")
 
-    # Merge stub entries (< 60 chars) with next entry
+    # Merge stub entries with next entry
     merged_bios = []
     i = 0
     while i < len(biographies):
         bio_text, raw_lines = biographies[i]
-        if len(bio_text.strip()) < 60 and i + 1 < len(biographies):
+        if len(bio_text.strip()) < cfg.stub_merge_max_chars and i + 1 < len(biographies):
             next_text, next_raw = biographies[i + 1]
             merged_bios.append((
                 f"{bio_text.strip()} {next_text.strip()}",
@@ -891,14 +1062,13 @@ def main():
     biographies = [
         entry
         for bio_text, raw_lines in biographies
-        for entry in split_merged_entries(bio_text, raw_lines)
+        for entry in split_merged_entries(bio_text, raw_lines, cfg)
     ]
 
     # Write output
-    if OUTPUT_DIR.exists():
-        import shutil
-        shutil.rmtree(OUTPUT_DIR)
-    OUTPUT_DIR.mkdir()
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
 
     log_entries = []
     written = 0
@@ -907,14 +1077,14 @@ def main():
     filename_counts = {}
 
     for bio_text, raw_lines in biographies:
-        if is_cross_reference(bio_text):
+        if is_cross_reference(bio_text, cfg):
             skipped_xrefs += 1
             continue
-        if is_false_positive(bio_text):
+        if is_false_positive(bio_text, cfg, words):
             skipped_false += 1
             continue
 
-        filename = extract_filename(bio_text, raw_lines)
+        filename = extract_filename(bio_text, raw_lines, cfg, words)
 
         if filename in filename_counts:
             filename_counts[filename] += 1
@@ -923,11 +1093,11 @@ def main():
         else:
             filename_counts[filename] = 0
 
-        (OUTPUT_DIR / filename).write_text(bio_text, encoding='utf-8')
+        (output_dir / filename).write_text(bio_text, encoding='utf-8')
 
         word_count = len(bio_text.split())
         char_count = len(bio_text)
-        status = "OK" if char_count >= 150 else "ALERTE: très court"
+        status = "OK" if char_count >= cfg.alert_min_chars else "ALERTE: très court"
         log_entries.append(f"{filename} | {word_count} mots | {char_count} car. | {status}")
         written += 1
 
@@ -935,7 +1105,7 @@ def main():
     alerts = [e for e in log_entries if "ALERTE" in e]
     report_lines = [
         "=" * 80,
-        "RAPPORT D'EXTRACTION - BiographieNationale Volume 1",
+        cfg.report_title,
         "=" * 80,
         "",
         f"Biographies extraites : {written}",
@@ -945,19 +1115,30 @@ def main():
         "",
     ]
     if alerts:
-        report_lines.append(f"--- ALERTES ({len(alerts)} entrées courtes < 150 car.) ---")
+        report_lines.append(f"--- ALERTES ({len(alerts)} entrées courtes < {cfg.alert_min_chars} car.) ---")
         report_lines.extend(f"  {a}" for a in alerts)
         report_lines.append("")
     report_lines.append("--- DÉTAIL COMPLET ---")
     report_lines.extend(f"  {entry}" for entry in log_entries)
 
-    LOG_FILE.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
+    log_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
 
     print(f"\nTerminé!")
-    print(f"  {written} biographies écrites dans {OUTPUT_DIR}/")
+    print(f"  {written} biographies écrites dans {output_dir}/")
     print(f"  {skipped_xrefs} renvois ignorés")
     print(f"  {skipped_false} faux positifs ignorés")
-    print(f"  Rapport: {LOG_FILE}")
+    print(f"  Rapport: {log_file}")
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    cfg = config_from_args(args)
+
+    if not cfg.pdf_path:
+        parser.error("No PDF path specified (provide it in the JSON config or as argument)")
+
+    run(cfg)
 
 
 if __name__ == "__main__":
