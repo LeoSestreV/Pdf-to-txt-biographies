@@ -18,19 +18,12 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import fitz  # PyMuPDF
-
-# ── PyMuPDF font flag bits (library constants, not document-specific) ────────
+import fitz
 
 PYMUPDF_BOLD_BIT = 1 << 4
 PYMUPDF_ITALIC_BIT = 1 << 1
 
-# ── Uppercase character class for regex (Western European + accented) ────────
-
 UC = r'A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞ'
-
-
-# ── Configuration ────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -42,63 +35,55 @@ class ExtractionConfig:
     Load per-volume overrides via ``ExtractionConfig.from_json(path)``.
     """
 
-    # -- Input / Output -------------------------------------------------------
     pdf_path: str = ""
     output_dir: str = "biographies_finales"
     log_file: str = "rapport_final.log"
-    report_title: str = ""  # empty → auto-generated from pdf filename
+    report_title: str = ""
 
-    # -- Page range (0-indexed) -----------------------------------------------
-    # None → auto-detect from PDF content
     start_page: int | None = None
     end_page: int | None = None
 
-    # Keywords that signal end-of-biographies (ERRATA, INDEX, etc.)
     end_section_keywords: list[str] = field(default_factory=lambda: [
         "ERRATA", "TABLE DES", "INDEX",
     ])
 
-    # -- Page layout geometry -------------------------------------------------
-    header_y: float = 60.0       # lines above this y are headers → skip
-    footer_y: float = 590.0      # (reserved for future use)
-    col_boundary: float = 290.0  # x < this → left column
-    y_merge_tolerance: float = 2.0  # merge lines within this y-distance
-    left_col_indent: tuple[float, float] = (146.0, 165.0)   # (min, max)
+    min_bio_starts_for_page_detection: int = 3
+
+    header_y: float = 60.0
+    footer_y: float = 590.0
+    col_boundary: float = 290.0
+    y_merge_tolerance: float = 2.0
+    left_col_indent: tuple[float, float] = (146.0, 165.0)
     right_col_indent: tuple[float, float] = (308.0, 330.0)
 
-    # -- Font detection thresholds --------------------------------------------
-    min_bold_name_size: float = 7.0   # bold spans must be ≥ this to count
-    max_attribution_size: float = 7.5  # bold < this at page bottom → attribution
-    footnote_y: float = 350.0         # y > this + small font → footnote
-    min_uppercase_ratio: float = 0.5   # fraction of uppercase in bold name
-    min_uppercase_count: int = 2       # minimum uppercase chars in bold name
+    min_bold_name_size: float = 7.0
+    max_attribution_size: float = 7.5
+    footnote_y: float = 350.0
+    min_uppercase_ratio: float = 0.5
+    min_uppercase_count: int = 2
 
-    # -- Text length thresholds -----------------------------------------------
-    stub_merge_max_chars: int = 60    # stubs shorter → merge with next
-    min_entry_chars: int = 30         # entries shorter → false positive
-    short_entry_chars: int = 100      # for all-caps / latin check
-    alert_min_chars: int = 150        # entries shorter → log alert
-    xref_max_chars: int = 300         # "Voir" entries shorter → cross-ref
-    xref_garbled_max_chars: int = 200  # garbled "Voir" variants
-    latin_sample_chars: int = 300     # sample size for latin detection
+    stub_merge_max_chars: int = 60
+    min_entry_chars: int = 30
+    short_entry_chars: int = 100
+    alert_min_chars: int = 150
+    xref_max_chars: int = 300
+    xref_garbled_max_chars: int = 200
+    latin_sample_chars: int = 300
     latin_uppercase_ratio: float = 0.8
-    min_alpha_for_latin: int = 30     # need this many alpha chars to check
+    min_alpha_for_latin: int = 30
 
-    # -- Name extraction ------------------------------------------------------
-    min_name_length: int = 3          # names shorter → rejected
-    max_name_alone_length: int = 50   # name-alone lines longer → not a name
-    max_name_chars: int = 80          # trigger truncation above this
-    max_filename_chars: int = 90      # truncate filenames above this
-    fallback_name_chars: int = 60     # chars from first comma as fallback
-    header_lines_count: int = 5       # how many lines to examine for name
+    min_name_length: int = 3
+    max_name_alone_length: int = 50
+    max_name_chars: int = 80
+    max_filename_chars: int = 90
+    fallback_name_chars: int = 60
+    header_lines_count: int = 5
 
-    # -- Merge & split thresholds ---------------------------------------------
-    max_merge_gap_lines: int = 2      # max line gap for name-continuation merge
-    split_part1_min_chars: int = 10   # min size for part1 in voir-split
-    split_part2_min_chars: int = 50   # min size for part2 in voir-split
-    author_attrib_max_size: int = 100  # max chars for author-attribution fp
+    max_merge_gap_lines: int = 2
+    split_part1_min_chars: int = 10
+    split_part2_min_chars: int = 50
+    author_attrib_max_size: int = 100
 
-    # -- Document-specific OCR corrections ------------------------------------
     ocr_fixes: dict[str, str] = field(default_factory=lambda: {
         'ARIVOIIL': 'ARNOUL',
     })
@@ -108,8 +93,6 @@ class ExtractionConfig:
         'ARIVOIIL': 'ARNOUL',
     })
 
-    # -- Extensible word lists ------------------------------------------------
-    # These extend (not replace) the built-in French defaults.
     extra_descriptors: list[str] = field(default_factory=list)
     extra_blacklisted_starts: list[str] = field(default_factory=list)
     extra_fragment_starters: list[str] = field(default_factory=list)
@@ -120,7 +103,6 @@ class ExtractionConfig:
     def from_json(cls, path: str | Path) -> "ExtractionConfig":
         """Load configuration from a JSON file.  Missing keys use defaults."""
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        # Convert list → tuple for indent ranges
         for key in ("left_col_indent", "right_col_indent"):
             if key in raw and isinstance(raw[key], list):
                 raw[key] = tuple(raw[key])
@@ -131,8 +113,6 @@ class ExtractionConfig:
         """True if start or end page must be auto-detected."""
         return self.start_page is None or self.end_page is None
 
-
-# ── Default word lists (French biographical dictionaries) ────────────────────
 
 _BASE_DESCRIPTORS = frozenset({
     'abbé', 'abbesse', 'administrateur', 'agronome', 'amiral', 'ancien',
@@ -266,9 +246,6 @@ def _build_word_sets(cfg: ExtractionConfig):
     }
 
 
-# ── Page data extraction ────────────────────────────────────────────────────
-
-
 def _extract_spans(line):
     """Extract non-empty spans with font metadata from a PDF line object."""
     return [
@@ -356,9 +333,6 @@ def extract_page_data(page, page_idx, cfg: ExtractionConfig):
     return lines_data
 
 
-# ── Detection helpers ────────────────────────────────────────────────────────
-
-
 def get_first_real_span(spans):
     """Get the first non-empty, non-asterisk span."""
     for s in spans:
@@ -384,9 +358,6 @@ def has_name_pattern(text, cfg: ExtractionConfig):
                 not re.match(r'^[IVXLCDM]+$', name_clean)):
             return True
     return False
-
-
-# ── Biography start detection ────────────────────────────────────────────────
 
 
 def _check_bold_name(spans, first, full, y, next_line_data, cfg: ExtractionConfig):
@@ -444,7 +415,7 @@ def _check_bold_name(spans, first, full, y, next_line_data, cfg: ExtractionConfi
 
 
 def _check_spaced_smallcaps(first, full, next_line_data):
-    """Method 2: Spaced small-caps pattern (A B B É)."""
+    """Method 2: Spaced small-caps pattern (A B B E)."""
     check_text = re.sub(r'^\*\s*', '', first['text'].strip())
     if not re.match(rf'^[{UC}]( [{UC}]){{2,}}', check_text):
         return False
@@ -461,7 +432,7 @@ def _check_spaced_smallcaps(first, full, next_line_data):
 
 
 def _check_indented_italic(x, spans, cfg: ExtractionConfig):
-    """Method 4: Indented UPPERCASE + italic prénom pattern."""
+    """Method 4: Indented UPPERCASE + italic prenom pattern."""
     if not (is_indented_for_bio(x, cfg) and len(spans) >= 2):
         return False
 
@@ -562,9 +533,6 @@ def is_biography_start(line_data, cfg: ExtractionConfig,
     return False
 
 
-# ── Name continuation & merging ──────────────────────────────────────────────
-
-
 def is_name_continuation(prev_text, curr_text):
     """Check if curr_text continues the name started in prev_text."""
     prev = prev_text.strip()
@@ -580,15 +548,14 @@ def is_name_continuation(prev_text, curr_text):
     return last_two.lower() in _BASE_NAME_CONTINUATION_PAIRS
 
 
-# ── Automatic page boundary detection ────────────────────────────────────────
-
-
 def detect_boundaries(doc, cfg: ExtractionConfig):
     """Resolve the first and last biography pages.
 
     If both start_page and end_page are set in config, use them directly.
     Otherwise, auto-detect the missing boundary:
-    - Forward scan: finds the first page containing a biography start.
+    - Forward scan: finds the first page with enough biography starts
+      (at least min_bio_starts_for_page_detection) to distinguish real
+      biography pages from title pages with incidental name patterns.
     - Backward scan: looks for end-section keywords (ERRATA, INDEX, etc.).
 
     Returns (start_page, end_page) as 0-indexed, end exclusive.
@@ -602,24 +569,21 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
 
     print("  Détection automatique des limites...")
 
-    # Forward scan for start page
     if start is None:
         start = 0
         for i in range(total):
             page_lines = extract_page_data(doc[i], i, cfg)
-            found = False
+            bio_count = 0
             for j, ld in enumerate(page_lines):
                 next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
                 prev_ld = page_lines[j - 1] if j > 0 else None
                 if is_biography_start(ld, cfg, next_ld, prev_ld):
-                    start = i
-                    print(f"  -> Début détecté : page {i} (PDF {i + 1})")
-                    found = True
-                    break
-            if found:
+                    bio_count += 1
+            if bio_count >= cfg.min_bio_starts_for_page_detection:
+                start = i
+                print(f"  -> Début détecté : page {i} (PDF {i + 1}) [{bio_count} biographies]")
                 break
 
-    # Backward scan for end page
     if end is None:
         end = total
         keywords_upper = [kw.upper() for kw in cfg.end_section_keywords]
@@ -639,9 +603,6 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
     return start, end
 
 
-# ── Collection & segmentation ────────────────────────────────────────────────
-
-
 def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: int):
     """Scan biography pages [start_page, end_page) and collect starts."""
 
@@ -657,14 +618,12 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
         if is_biography_start(ld, cfg, next_ld, prev_ld):
             bio_starts.append((gidx, pidx, ld))
 
-    # Post-process 1: Remove false starts caused by hyphenation
     bio_starts = [
         (gidx, pidx, ld) for gidx, pidx, ld in bio_starts
         if gidx == 0 or not re.search(rf'[{UC}]{{2,}}-$',
                                        all_lines[gidx - 1][2]['full_text'].rstrip())
     ]
 
-    # Post-process 2: Merge when gap ≤ max_merge_gap_lines and prev ends with particle
     merged = []
     skip_next = False
     for i, (gidx, pidx, ld) in enumerate(bio_starts):
@@ -701,11 +660,8 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
     ]
 
 
-# ── Text cleaning ────────────────────────────────────────────────────────────
-
-
 def collapse_spaced_names(text):
-    """Collapse 'A B B É' -> 'ABBÉ'."""
+    """Collapse 'A B B E' -> 'ABBE'."""
     def _collapse(m):
         prefix = m.group(1) or ''
         spaced = m.group(0)[len(prefix):]
@@ -739,9 +695,6 @@ def clean_biography_text(raw_lines, cfg: ExtractionConfig):
     for old, new in cfg.ocr_fixes.items():
         text = text.replace(old, new)
     return text
-
-
-# ── Name extraction ──────────────────────────────────────────────────────────
 
 
 def _join_header_lines(raw_lines, cfg: ExtractionConfig):
@@ -845,9 +798,6 @@ def extract_name_from_lines(raw_lines, cfg: ExtractionConfig, words: dict):
     return name
 
 
-# ── Filename & OCR cleanup ──────────────────────────────────────────────────
-
-
 def fix_ocr_spacing(name, cfg: ExtractionConfig):
     """Fix OCR artifacts that insert spaces within words."""
     def collapse_spaced_word(m):
@@ -901,9 +851,6 @@ def extract_filename(bio_text, raw_lines, cfg: ExtractionConfig, words: dict):
     if len(name) > cfg.max_filename_chars:
         name = name[:cfg.max_filename_chars].rstrip()
     return (name or 'UNKNOWN') + '.txt'
-
-
-# ── Entry classification ────────────────────────────────────────────────────
 
 
 def is_cross_reference(bio_text, cfg: ExtractionConfig):
@@ -1014,15 +961,12 @@ def split_merged_entries(bio_text, raw_lines, cfg: ExtractionConfig):
     return [(bio_text, raw_lines)]
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
-
-
 def build_config(source: str) -> ExtractionConfig:
     """Build ExtractionConfig from a source path (PDF or JSON config).
 
     Auto-detected by file extension:
-      .json → load config, pdf_path must be inside the JSON
-      .pdf  → use defaults, auto-detect page boundaries
+      .json -> load config, pdf_path must be inside the JSON
+      .pdf  -> use defaults, auto-detect page boundaries
     """
     if source.endswith('.json'):
         cfg = ExtractionConfig.from_json(source)
@@ -1038,9 +982,6 @@ def build_config(source: str) -> ExtractionConfig:
         raise SystemExit(f"Erreur: le fichier {cfg.pdf_path} n'existe pas.")
 
     return cfg
-
-
-# ── Main pipeline ────────────────────────────────────────────────────────────
 
 
 def run(cfg: ExtractionConfig):
@@ -1072,7 +1013,6 @@ def run(cfg: ExtractionConfig):
 
     print(f"Biographies segmented: {len(biographies)}")
 
-    # Merge stub entries with next entry
     merged_bios = []
     i = 0
     while i < len(biographies):
@@ -1090,14 +1030,12 @@ def run(cfg: ExtractionConfig):
     biographies = merged_bios
     print(f"After merging stubs: {len(biographies)}")
 
-    # Split merged entries (cross-ref + bio in one segment)
     biographies = [
         entry
         for bio_text, raw_lines in biographies
         for entry in split_merged_entries(bio_text, raw_lines, cfg)
     ]
 
-    # Write output
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True)
@@ -1133,7 +1071,6 @@ def run(cfg: ExtractionConfig):
         log_entries.append(f"{filename} | {word_count} mots | {char_count} car. | {status}")
         written += 1
 
-    # Write report
     title = cfg.report_title or f"RAPPORT D'EXTRACTION - {pdf_path.name}"
     alerts = [e for e in log_entries if "ALERTE" in e]
     report_lines = [
