@@ -7,24 +7,19 @@ Automated extraction pipeline that segments individual biographies from scanned 
 ```
 extract_biographies.py   <- CLI entry point + orchestrator
 constants.py             <- Word lists, regex patterns, PyMuPDF flags
-config.py                <- ExtractionConfig dataclass + JSON loading
+config.py                <- ExtractionConfig dataclass
 pdf_engine.py            <- PyMuPDF extraction (spans, lines, columns)
 classifiers.py           <- Biography start detection, false positives, cross-refs
 cleaner.py               <- Text cleaning, name extraction, filename generation
-volume1_config.json      <- Volume 1 specific configuration
 ```
 
 ## Usage
 
 ```bash
-# Auto-detect page boundaries
 python extract_biographies.py BiographieNationale_Volume1.pdf
-
-# Manual configuration (pages, thresholds, OCR fixes)
-python extract_biographies.py volume1_config.json
 ```
 
-Input type is detected by extension: `.json` loads a full config, `.pdf` uses defaults with automatic boundary detection.
+Page boundaries are auto-detected: forward scan finds the first page with multiple biography starts, backward scan looks for ERRATA/INDEX sections.
 
 ## Extraction Flow
 
@@ -106,27 +101,8 @@ PDF
 |       -> safe filename           |
 |     - Write each biography to    |
 |       biographies_finales/       |
-|     - Generate rapport_final.log |
 +----------------------------------+
 ```
-
-## Configuration
-
-`ExtractionConfig` (`config.py`) holds all tunable parameters. Create a JSON file per volume:
-
-```json
-{
-    "pdf_path": "BiographieNationale_Volume1.pdf",
-    "output_dir": "biographies_finales",
-    "start_page": 41,
-    "end_page": 469,
-    "header_y": 60.0,
-    "col_boundary": 290.0,
-    "ocr_fixes": {"ARIVOIIL": "ARNOUL"}
-}
-```
-
-Missing keys fall back to defaults. Set `start_page` / `end_page` to `null` to enable auto-detection.
 
 ## Adding Detection Rules
 

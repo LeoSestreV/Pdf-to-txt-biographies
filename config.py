@@ -1,6 +1,5 @@
-"""ExtractionConfig dataclass and configuration loading."""
+"""ExtractionConfig dataclass."""
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,13 +10,10 @@ class ExtractionConfig:
 
     Every threshold, size, and document-specific value lives here.
     Defaults match the Biographie Nationale Volume 1 layout.
-    Load per-volume overrides via ``ExtractionConfig.from_json(path)``.
     """
 
     pdf_path: str = ""
     output_dir: str = "biographies_finales"
-    log_file: str = "rapport_final.log"
-    report_title: str = ""
 
     start_page: int | None = None
     end_page: int | None = None
@@ -78,39 +74,7 @@ class ExtractionConfig:
     extra_latin_fragments: list[str] = field(default_factory=list)
     extra_latin_indicators: list[str] = field(default_factory=list)
 
-    @classmethod
-    def from_json(cls, path: str | Path) -> "ExtractionConfig":
-        """Load configuration from a JSON file.  Missing keys use defaults."""
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        for key in ("left_col_indent", "right_col_indent"):
-            if key in raw and isinstance(raw[key], list):
-                raw[key] = tuple(raw[key])
-        return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
-
     @property
     def needs_auto_detect(self) -> bool:
         """True if start or end page must be auto-detected."""
         return self.start_page is None or self.end_page is None
-
-
-def build_config(source: str) -> ExtractionConfig:
-    """Build ExtractionConfig from a source path (PDF or JSON config).
-
-    Auto-detected by file extension:
-      .json -> load config, pdf_path must be inside the JSON
-      .pdf  -> use defaults, auto-detect page boundaries
-    """
-    if source.endswith('.json'):
-        cfg = ExtractionConfig.from_json(source)
-    else:
-        cfg = ExtractionConfig(pdf_path=source)
-
-    if not cfg.pdf_path:
-        raise SystemExit(
-            f"Erreur: pas de pdf_path dans {source}. "
-            "Ajoutez \"pdf_path\": \"mon_fichier.pdf\" dans le JSON."
-        )
-    if not Path(cfg.pdf_path).exists():
-        raise SystemExit(f"Erreur: le fichier {cfg.pdf_path} n'existe pas.")
-
-    return cfg

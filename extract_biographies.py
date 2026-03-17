@@ -4,11 +4,10 @@ Extract biographies from scanned PDF volumes of biographical dictionaries.
 
 Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
 and indentation analysis to reliably segment biography entries.
-Automatically detects biography start/end pages unless overridden in config.
+Automatically detects biography start/end pages.
 
 Usage:
     python extract_biographies.py BiographieNationale_Volume1.pdf
-    python extract_biographies.py volume1_config.json
 """
 
 import argparse
@@ -24,7 +23,7 @@ from classifiers import (
     is_name_continuation, split_merged_entries,
 )
 from cleaner import clean_biography_text, extract_filename
-from config import ExtractionConfig, build_config
+from config import ExtractionConfig
 from constants import UC, build_word_sets
 from pdf_engine import detect_boundaries, extract_page_data
 
@@ -87,14 +86,17 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
     ]
 
 
-def run(cfg: ExtractionConfig):
-    """Run the full extraction pipeline with the given configuration."""
-    pdf_path = Path(cfg.pdf_path)
-    output_dir = Path(cfg.output_dir)
-    log_file = Path(cfg.log_file)
+def run(pdf_path: str):
+    """Run the full extraction pipeline."""
+    path = Path(pdf_path)
+    if not path.exists():
+        raise SystemExit(f"Erreur: le fichier {pdf_path} n'existe pas.")
 
-    logger.info("Opening %s...", pdf_path)
-    doc = fitz.open(str(pdf_path))
+    cfg = ExtractionConfig(pdf_path=pdf_path)
+    output_dir = Path(cfg.output_dir)
+
+    logger.info("Opening %s...", path)
+    doc = fitz.open(str(path))
     logger.info("Total pages: %d", len(doc))
 
     start_page, end_page = detect_boundaries(doc, cfg)
@@ -143,7 +145,6 @@ def run(cfg: ExtractionConfig):
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True)
 
-    log_entries = []
     written = 0
     skipped_xrefs = 0
     skipped_false = 0
@@ -167,53 +168,24 @@ def run(cfg: ExtractionConfig):
             filename_counts[filename] = 0
 
         (output_dir / filename).write_text(bio_text, encoding='utf-8')
-
-        word_count = len(bio_text.split())
-        char_count = len(bio_text)
-        status = "OK" if char_count >= cfg.alert_min_chars else "ALERTE: très court"
-        log_entries.append(f"{filename} | {word_count} mots | {char_count} car. | {status}")
         written += 1
-
-    title = cfg.report_title or f"RAPPORT D'EXTRACTION - {pdf_path.name}"
-    alerts = [e for e in log_entries if "ALERTE" in e]
-    report_lines = [
-        "=" * 80,
-        title,
-        "=" * 80,
-        "",
-        f"Biographies extraites : {written}",
-        f"Renvois (Voir...) ignorés : {skipped_xrefs}",
-        f"Faux positifs ignorés : {skipped_false}",
-        f"Total entrées détectées : {len(biographies)}",
-        "",
-    ]
-    if alerts:
-        report_lines.append(f"--- ALERTES ({len(alerts)} entrées courtes < {cfg.alert_min_chars} car.) ---")
-        report_lines.extend(f"  {a}" for a in alerts)
-        report_lines.append("")
-    report_lines.append("--- DÉTAIL COMPLET ---")
-    report_lines.extend(f"  {entry}" for entry in log_entries)
-
-    log_file.write_text('\n'.join(report_lines) + '\n', encoding='utf-8')
 
     logger.info("Terminé!")
     logger.info("  %d biographies écrites dans %s/", written, output_dir)
     logger.info("  %d renvois ignorés", skipped_xrefs)
     logger.info("  %d faux positifs ignorés", skipped_false)
-    logger.info("  Rapport: %s", log_file)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Extract biographies from scanned PDF biographical dictionaries.",
-        epilog="Examples:\n"
-               "  %(prog)s BiographieNationale_Volume1.pdf\n"
-               "  %(prog)s volume1_config.json\n",
+        epilog="Example:\n"
+               "  %(prog)s BiographieNationale_Volume1.pdf\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "source",
-        help="PDF file or JSON config (auto-detected by extension)",
+        "pdf",
+        help="PDF file to extract biographies from",
     )
     args = parser.parse_args()
 
@@ -222,7 +194,7 @@ def main():
         format="%(message)s",
     )
 
-    run(build_config(args.source))
+    run(args.pdf)
 
 
 if __name__ == "__main__":
