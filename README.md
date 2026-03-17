@@ -8,32 +8,42 @@ Automated extraction pipeline that segments individual biographies from scanned 
 extract_biographies.py   <- CLI entry point + pipeline orchestrator
 constants.py             <- Word lists, regex patterns, PyMuPDF font flag bits
 config.py                <- ExtractionConfig dataclass (all tunable thresholds)
-pdf_engine.py            <- PyMuPDF text extraction and page boundary detection
+pdf_engine.py            <- PyMuPDF text extraction, layout auto-detection, page boundary detection
 classifiers.py           <- Biography start detection, false positive / cross-ref filters
 cleaner.py               <- Text cleaning, name extraction, filename generation
+BioPdf/                  <- Input directory: place PDF volumes here
+biographies_finales/     <- Output directory (auto-created, one subfolder per volume)
 ```
 
 ## Usage
 
 ```bash
-# Single volume
-python extract_biographies.py BiographieNationale_Volume1.pdf
+# Place PDFs in BioPdf/, then run:
+python extract_biographies.py
 
-# Multiple volumes (one subfolder per volume)
-python extract_biographies.py Volume1.pdf Volume2.pdf Volume3.pdf
-
-# Custom output directory
-python extract_biographies.py -o output/ Volume1.pdf Volume2.pdf
+# Custom input/output directories:
+python extract_biographies.py -i my_pdfs/ -o my_output/
 ```
 
-With a single PDF, output goes to `biographies_finales/`. With multiple PDFs, each volume gets its own subfolder: `biographies_finales/<pdf_stem>/`. Each biography is one `.txt` file named after the person (e.g. `BENTHAM (Jérémie).txt`).
+The script auto-detects all `*.pdf` files in `BioPdf/`, processes each one, and writes biographies to `biographies_finales/<pdf_stem>/`. Each biography is one `.txt` file named after the person (e.g. `BENTHAM (Jérémie).txt`).
+
+Layout parameters (column boundary, header position, indentation ranges) are automatically detected per volume -- no manual tuning needed.
 
 ## Extraction Flow
 
 ```
-PDF
+BioPdf/*.pdf
  |
- v
+ v  (for each PDF)
++----------------------------------+
+|  0. auto_detect_layout()         |  pdf_engine.py
+|     Sample pages to detect:      |
+|     - col_boundary (column gap)  |
+|     - header_y (header zone)     |
+|     - left/right_col_indent      |
+|       (biography name positions) |
++--------------+-------------------+
+               v
 +----------------------------------+
 |  1. detect_boundaries()          |  pdf_engine.py
 |     Forward scan: find first     |
@@ -41,6 +51,7 @@ PDF
 |     starts                       |
 |     Backward scan: look for      |
 |     ERRATA / INDEX / TABLE DES   |
+|     (last 30 pages only)         |
 +--------------+-------------------+
                v
 +----------------------------------+
@@ -108,10 +119,21 @@ PDF
 |       -> safe filename           |
 |     - Write each biography to    |
 |       biographies_finales/       |
+|       <pdf_stem>/                |
 +----------------------------------+
 ```
 
 ## How It Works
+
+### Step 0 -- Layout auto-detection (`pdf_engine.py`)
+
+Before processing, `auto_detect_layout()` samples pages from the middle of the PDF to automatically determine layout parameters:
+
+- **Column boundary** (`col_boundary`): found by analyzing the X-coordinate distribution of all text lines and locating the largest gap between 180-380pt -- the whitespace between the two columns.
+- **Header Y** (`header_y`): found by detecting the first large gap in Y-coordinate distribution below 100pt -- the transition from running headers to body text.
+- **Indent ranges** (`left_col_indent`, `right_col_indent`): found by collecting X positions of bold uppercase text (biography names) in each column, then computing IQR-based bounds to exclude outliers.
+
+This makes the pipeline work on any volume without manual configuration.
 
 ### Step 1 -- Page boundary detection (`pdf_engine.py`)
 
@@ -124,8 +146,8 @@ The PDF contains front matter (title page, preface, table of contents) and back 
 
 For each page in the detected range, `extract_page_data()` calls PyMuPDF's `page.get_text('dict')` to get every text span with its bounding box, font name, font size, and flag bits. The raw data is then processed:
 
-1. **Header filtering**: lines with `y < header_y` (default 60pt) are discarded (running headers like page numbers and volume titles).
-2. **Column assignment**: each line is assigned to left or right column based on whether its x-coordinate is below or above `col_boundary` (default 290pt).
+1. **Header filtering**: lines with `y < header_y` (auto-detected) are discarded (running headers like page numbers and volume titles).
+2. **Column assignment**: each line is assigned to left or right column based on whether its x-coordinate is below or above `col_boundary` (auto-detected).
 3. **Y-merge**: PDF engines often split a single visual line into multiple span objects at slightly different y-coordinates. Lines within `y_merge_tolerance` (default 2pt) in the same column are merged into one logical line, preserving per-span font metadata.
 4. **Ordering**: merged lines are sorted left-column-first, then by y-position within each column, producing a natural reading order.
 
@@ -149,7 +171,7 @@ The `False` return is critical: it lets early validators block later ones. For e
 
 **Validator 2 -- Spaced small-caps** (`_check_spaced_smallcaps`): detects names printed as spaced uppercase letters like `A B B É` (common in some volumes). Matched by regex `^[UC]( [UC]){2,}`, then checks for continuation on same/next line.
 
-**Validator 3 -- Indented name pattern** (`_check_indented_name_pattern`): checks if the line's x-position falls within the biography indent range (`left_col_indent` or `right_col_indent`) and the text matches the uppercase name pattern `NAME, ...` or `NAME(...)`.
+**Validator 3 -- Indented name pattern** (`_check_indented_name_pattern`): checks if the line's x-position falls within the biography indent range (`left_col_indent` or `right_col_indent`, auto-detected) and the text matches the uppercase name pattern `NAME, ...` or `NAME(...)`.
 
 **Validator 4 -- Indented uppercase + italic** (`_check_indented_italic`): for volumes where the first name is in italic after an uppercase surname (e.g. `BENTHAM` *Jérémie*). Requires indentation, non-bold first span, uppercase surname, and italic or parenthesized continuation.
 
@@ -188,19 +210,19 @@ Each entry is classified before writing:
 
 Surviving entries get a filename derived from the extracted name (`extract_filename()`), with OCR spacing fixes, trailing phrase cleanup, and filesystem-unsafe character replacement. Duplicate filenames are suffixed with `(1)`, `(2)`, etc.
 
-Each biography is written as a single `.txt` file. With a single PDF, files go to `biographies_finales/`. With multiple PDFs, each volume gets a subfolder: `biographies_finales/<pdf_stem>/`.
+Each biography is written as a single `.txt` file in `biographies_finales/<pdf_stem>/`.
 
 ## Configuration
 
-All thresholds live in `ExtractionConfig` (`config.py`). Key parameters:
+All thresholds live in `ExtractionConfig` (`config.py`). Layout parameters are auto-detected per volume but can be overridden. Key parameters:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `header_y` | 60.0 | Y-coordinate below which lines are page headers |
-| `col_boundary` | 290.0 | X-coordinate separating left/right columns |
+| `header_y` | 60.0 | Y-coordinate below which lines are page headers (auto-detected) |
+| `col_boundary` | 290.0 | X-coordinate separating left/right columns (auto-detected) |
 | `y_merge_tolerance` | 2.0 | Max Y-distance (pt) to merge split line spans |
-| `left_col_indent` | (146, 165) | X-range for biography start indentation (left col) |
-| `right_col_indent` | (308, 330) | X-range for biography start indentation (right col) |
+| `left_col_indent` | (146, 165) | X-range for biography start indentation, left col (auto-detected) |
+| `right_col_indent` | (308, 330) | X-range for biography start indentation, right col (auto-detected) |
 | `min_bold_name_size` | 7.0 | Min font size for bold name detection |
 | `max_attribution_size` | 7.5 | Max font size to consider as author attribution |
 | `min_bio_starts_for_page_detection` | 3 | Min biography starts on a page to accept it as start |

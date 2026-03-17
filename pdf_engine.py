@@ -1,6 +1,7 @@
 """PyMuPDF-based PDF text extraction with font metadata."""
 
 import logging
+from collections import Counter
 
 from config import ExtractionConfig
 from constants import PYMUPDF_BOLD_BIT, PYMUPDF_ITALIC_BIT
@@ -93,6 +94,116 @@ def extract_page_data(page, page_idx, cfg: ExtractionConfig):
     for ld in lines_data:
         ld['page'] = page_idx
     return lines_data
+
+
+def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
+    """Analyze PDF pages to auto-detect column boundary and indent ranges.
+
+    Samples content pages to find:
+    - col_boundary: gap between left and right column X positions
+    - header_y: Y below which lines are running headers
+    - left_col_indent / right_col_indent: X ranges for biography start indentation
+    """
+    total = len(doc)
+    if sample_range is None:
+        # Sample pages from the middle third of the document
+        start = max(0, total // 5)
+        end = min(total, total * 4 // 5)
+        step = max(1, (end - start) // 40)
+        sample_range = range(start, end, step)
+
+    all_x = []
+    all_y = []
+    bold_x = []
+
+    for pi in sample_range:
+        page = doc[pi]
+        for b in page.get_text('dict')['blocks']:
+            if 'lines' not in b:
+                continue
+            for line in b['lines']:
+                y = line['bbox'][1]
+                x = line['bbox'][0]
+                for s in line['spans']:
+                    if not s['text'].strip():
+                        continue
+                    all_x.append(int(x))
+                    all_y.append(int(y))
+                    if (s['flags'] & PYMUPDF_BOLD_BIT) and s['size'] >= 7.0:
+                        import re
+                        clean = re.sub(r'[\s\-\'\.,;:\(\)\*]', '', s['text'])
+                        if clean and len(clean) >= 3:
+                            upper = sum(1 for c in clean if c.isupper())
+                            if upper / len(clean) > 0.5:
+                                bold_x.append(int(x))
+                    break  # only first span per line
+
+    if not all_x:
+        return
+
+    # Find column boundary: largest gap in X distribution between 200-350
+    x_counts = Counter(all_x)
+    buckets = {}
+    for x, cnt in x_counts.items():
+        bucket = (x // 5) * 5
+        buckets[bucket] = buckets.get(bucket, 0) + cnt
+
+    sorted_buckets = sorted(buckets.keys())
+    best_gap_start = 0
+    best_gap_size = 0
+    for i in range(len(sorted_buckets) - 1):
+        gap = sorted_buckets[i + 1] - sorted_buckets[i]
+        mid = (sorted_buckets[i] + sorted_buckets[i + 1]) / 2
+        if 180 < mid < 380 and gap > best_gap_size:
+            best_gap_size = gap
+            best_gap_start = sorted_buckets[i]
+
+    if best_gap_size >= 15:
+        col_boundary = best_gap_start + best_gap_size // 2
+        cfg.col_boundary = float(col_boundary)
+        logger.info("  col_boundary auto-détecté: %.0f", cfg.col_boundary)
+
+    # Auto-detect header_y: find the Y below which very few lines appear
+    y_counts = Counter(all_y)
+    sorted_y = sorted(y_counts.keys())
+    if sorted_y:
+        # Find first big gap in Y distribution (header -> content transition)
+        for i in range(len(sorted_y) - 1):
+            gap = sorted_y[i + 1] - sorted_y[i]
+            if gap >= 15 and sorted_y[i] < 100:
+                cfg.header_y = float(sorted_y[i] + gap // 2)
+                logger.info("  header_y auto-détecté: %.0f", cfg.header_y)
+                break
+
+    # Auto-detect indent ranges from bold biography name positions
+    # Use IQR-based filtering to remove outliers, then take min/max
+    def _indent_range(positions):
+        if len(positions) < 3:
+            return None
+        positions = sorted(positions)
+        q1 = positions[len(positions) // 4]
+        q3 = positions[3 * len(positions) // 4]
+        iqr = q3 - q1
+        lo = q1 - 1.5 * max(iqr, 10)
+        hi = q3 + 1.5 * max(iqr, 10)
+        filtered = [x for x in positions if lo <= x <= hi]
+        if not filtered:
+            return None
+        return (float(min(filtered) - 2), float(max(filtered) + 5))
+
+    if bold_x:
+        left_bold = [x for x in bold_x if x < cfg.col_boundary]
+        right_bold = [x for x in bold_x if x >= cfg.col_boundary]
+
+        r = _indent_range(left_bold)
+        if r:
+            cfg.left_col_indent = r
+            logger.info("  left_col_indent auto-détecté: (%.0f, %.0f)", *cfg.left_col_indent)
+
+        r = _indent_range(right_bold)
+        if r:
+            cfg.right_col_indent = r
+            logger.info("  right_col_indent auto-détecté: (%.0f, %.0f)", *cfg.right_col_indent)
 
 
 def detect_boundaries(doc, cfg: ExtractionConfig):

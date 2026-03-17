@@ -4,10 +4,10 @@ Extract biographies from scanned PDF volumes of biographical dictionaries.
 
 Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
 and indentation analysis to reliably segment biography entries.
-Automatically detects biography start/end pages.
+Automatically detects all PDFs in BioPdf/ and layout parameters per volume.
 
 Usage:
-    python extract_biographies.py Volume1.pdf Volume2.pdf Volume3.pdf
+    python extract_biographies.py
 """
 
 import argparse
@@ -25,9 +25,12 @@ from classifiers import (
 from cleaner import clean_biography_text, extract_filename
 from config import ExtractionConfig
 from constants import UC, build_word_sets
-from pdf_engine import detect_boundaries, extract_page_data
+from pdf_engine import auto_detect_layout, detect_boundaries, extract_page_data
 
 logger = logging.getLogger(__name__)
+
+INPUT_DIR = "BioPdf"
+OUTPUT_DIR = "biographies_finales"
 
 
 def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: int):
@@ -98,6 +101,9 @@ def run(pdf_path: str, output_dir: Path):
     logger.info("Opening %s...", path)
     doc = fitz.open(str(path))
     logger.info("Total pages: %d", len(doc))
+
+    logger.info("Auto-détection du layout...")
+    auto_detect_layout(doc, cfg)
 
     start_page, end_page = detect_boundaries(doc, cfg)
     logger.info("Pages traitées : %d à %d", start_page + 1, end_page)
@@ -179,19 +185,19 @@ def main():
     parser = argparse.ArgumentParser(
         description="Extract biographies from scanned PDF biographical dictionaries.",
         epilog="Examples:\n"
-               "  %(prog)s Volume1.pdf\n"
-               "  %(prog)s Volume1.pdf Volume2.pdf Volume3.pdf\n",
+               "  %(prog)s                    # auto-detect all PDFs in BioPdf/\n"
+               "  %(prog)s -i my_pdfs/        # custom input directory\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "pdfs",
-        nargs="+",
-        help="PDF file(s) to extract biographies from",
+        "-i", "--input",
+        default=INPUT_DIR,
+        help=f"Input directory containing PDF files (default: {INPUT_DIR})",
     )
     parser.add_argument(
         "-o", "--output",
-        default="biographies_finales",
-        help="Base output directory (default: biographies_finales)",
+        default=OUTPUT_DIR,
+        help=f"Base output directory (default: {OUTPUT_DIR})",
     )
     args = parser.parse_args()
 
@@ -200,24 +206,27 @@ def main():
         format="%(message)s",
     )
 
+    input_dir = Path(args.input)
+    if not input_dir.is_dir():
+        raise SystemExit(f"Erreur: le dossier {input_dir} n'existe pas.")
+
+    pdfs = sorted(input_dir.glob("*.pdf"))
+    if not pdfs:
+        raise SystemExit(f"Erreur: aucun PDF trouvé dans {input_dir}/")
+
+    logger.info("Trouvé %d PDF(s) dans %s/", len(pdfs), input_dir)
     base_dir = Path(args.output)
-    multiple = len(args.pdfs) > 1
     total_written = 0
 
-    for pdf_path in args.pdfs:
-        stem = Path(pdf_path).stem
-        if multiple:
-            output_dir = base_dir / stem
-        else:
-            output_dir = base_dir
+    for pdf_path in pdfs:
+        output_dir = base_dir / pdf_path.stem
         logger.info("=" * 60)
         logger.info("Processing: %s -> %s/", pdf_path, output_dir)
         logger.info("=" * 60)
-        total_written += run(pdf_path, output_dir)
+        total_written += run(str(pdf_path), output_dir)
 
-    if multiple:
-        logger.info("=" * 60)
-        logger.info("Total: %d biographies écrites dans %s/", total_written, base_dir)
+    logger.info("=" * 60)
+    logger.info("Total: %d biographies écrites dans %s/", total_written, base_dir)
 
 
 if __name__ == "__main__":
