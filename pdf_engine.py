@@ -136,8 +136,11 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
     if end is None:
         end = total
         keywords_upper = [kw.upper() for kw in cfg.end_section_keywords]
+        # Only look for end-section keywords in the last portion of the PDF
+        # to avoid false matches on keywords appearing in biography body text.
+        search_start = max(start, total - cfg.end_section_search_pages)
         found_end = False
-        for i in range(total - 1, start, -1):
+        for i in range(total - 1, search_start, -1):
             text = doc[i].get_text("text").upper()
             if any(kw in text for kw in keywords_upper):
                 end = i

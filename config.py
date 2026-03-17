@@ -23,6 +23,7 @@ class ExtractionConfig:
     ])
 
     min_bio_starts_for_page_detection: int = 3
+    end_section_search_pages: int = 30
 
     header_y: float = 60.0
     footer_y: float = 590.0

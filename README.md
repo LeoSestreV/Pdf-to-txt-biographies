@@ -16,10 +16,17 @@ cleaner.py               <- Text cleaning, name extraction, filename generation
 ## Usage
 
 ```bash
+# Single volume
 python extract_biographies.py BiographieNationale_Volume1.pdf
+
+# Multiple volumes (one subfolder per volume)
+python extract_biographies.py Volume1.pdf Volume2.pdf Volume3.pdf
+
+# Custom output directory
+python extract_biographies.py -o output/ Volume1.pdf Volume2.pdf
 ```
 
-Output goes to `biographies_finales/`, one `.txt` file per biography, named after the person (e.g. `BENTHAM (Jérémie).txt`).
+With a single PDF, output goes to `biographies_finales/`. With multiple PDFs, each volume gets its own subfolder: `biographies_finales/<pdf_stem>/`. Each biography is one `.txt` file named after the person (e.g. `BENTHAM (Jérémie).txt`).
 
 ## Extraction Flow
 
@@ -111,7 +118,7 @@ PDF
 The PDF contains front matter (title page, preface, table of contents) and back matter (errata, index) surrounding the actual biography pages. Rather than hardcode page numbers, boundaries are auto-detected:
 
 - **Forward scan**: iterates from page 0 onward. For each page, runs the full biography start detection logic and counts how many biography starts are found. The first page with `>= min_bio_starts_for_page_detection` (default 3) hits is selected as the start. The threshold of 3 avoids false positives from title pages that may contain one or two bold uppercase names incidentally (e.g. a publisher name like `THIRY-VAN BUGGENHOUDT, IMPRIMEUR-ÉDITEUR`).
-- **Backward scan**: iterates from the last page backward, looking for end-section keywords (`ERRATA`, `TABLE DES`, `INDEX`). Stops at the first page that does *not* contain any keyword after a run of pages that do.
+- **Backward scan**: iterates backward from the last page, but only within the last `end_section_search_pages` (default 30) pages of the PDF. This avoids false matches on keywords like `ERRATA` or `TABLE DES` that appear incidentally in biography body text. Looks for end-section keywords (`ERRATA`, `TABLE DES`, `INDEX`) and stops at the first page that does *not* contain any keyword after a run of pages that do. If no end-section is found, uses the total page count.
 
 ### Step 2 -- Text extraction with font metadata (`pdf_engine.py`)
 
@@ -181,7 +188,7 @@ Each entry is classified before writing:
 
 Surviving entries get a filename derived from the extracted name (`extract_filename()`), with OCR spacing fixes, trailing phrase cleanup, and filesystem-unsafe character replacement. Duplicate filenames are suffixed with `(1)`, `(2)`, etc.
 
-Each biography is written as a single `.txt` file in `biographies_finales/`.
+Each biography is written as a single `.txt` file. With a single PDF, files go to `biographies_finales/`. With multiple PDFs, each volume gets a subfolder: `biographies_finales/<pdf_stem>/`.
 
 ## Configuration
 
@@ -197,6 +204,7 @@ All thresholds live in `ExtractionConfig` (`config.py`). Key parameters:
 | `min_bold_name_size` | 7.0 | Min font size for bold name detection |
 | `max_attribution_size` | 7.5 | Max font size to consider as author attribution |
 | `min_bio_starts_for_page_detection` | 3 | Min biography starts on a page to accept it as start |
+| `end_section_search_pages` | 30 | Only search for end-section keywords in last N pages |
 | `ocr_fixes` | `{"ARIVOIIL": "ARNOUL"}` | Text-level OCR corrections |
 | `filename_ocr_fixes` | ... | Filename-level OCR corrections |
 

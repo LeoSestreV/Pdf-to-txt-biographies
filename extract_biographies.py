@@ -7,7 +7,7 @@ and indentation analysis to reliably segment biography entries.
 Automatically detects biography start/end pages.
 
 Usage:
-    python extract_biographies.py BiographieNationale_Volume1.pdf
+    python extract_biographies.py Volume1.pdf Volume2.pdf Volume3.pdf
 """
 
 import argparse
@@ -86,14 +86,14 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
     ]
 
 
-def run(pdf_path: str):
-    """Run the full extraction pipeline."""
+def run(pdf_path: str, output_dir: Path):
+    """Run the full extraction pipeline for a single PDF."""
     path = Path(pdf_path)
     if not path.exists():
         raise SystemExit(f"Erreur: le fichier {pdf_path} n'existe pas.")
 
     cfg = ExtractionConfig(pdf_path=pdf_path)
-    output_dir = Path(cfg.output_dir)
+    words = build_word_sets(cfg)
 
     logger.info("Opening %s...", path)
     doc = fitz.open(str(path))
@@ -101,8 +101,6 @@ def run(pdf_path: str):
 
     start_page, end_page = detect_boundaries(doc, cfg)
     logger.info("Pages traitées : %d à %d", start_page + 1, end_page)
-
-    words = build_word_sets(cfg)
 
     logger.info("Extracting text with font metadata...")
     all_lines, bio_starts = collect_bio_starts(doc, cfg, start_page, end_page)
@@ -174,18 +172,26 @@ def run(pdf_path: str):
     logger.info("  %d biographies écrites dans %s/", written, output_dir)
     logger.info("  %d renvois ignorés", skipped_xrefs)
     logger.info("  %d faux positifs ignorés", skipped_false)
+    return written
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Extract biographies from scanned PDF biographical dictionaries.",
-        epilog="Example:\n"
-               "  %(prog)s BiographieNationale_Volume1.pdf\n",
+        epilog="Examples:\n"
+               "  %(prog)s Volume1.pdf\n"
+               "  %(prog)s Volume1.pdf Volume2.pdf Volume3.pdf\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "pdf",
-        help="PDF file to extract biographies from",
+        "pdfs",
+        nargs="+",
+        help="PDF file(s) to extract biographies from",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        default="biographies_finales",
+        help="Base output directory (default: biographies_finales)",
     )
     args = parser.parse_args()
 
@@ -194,7 +200,24 @@ def main():
         format="%(message)s",
     )
 
-    run(args.pdf)
+    base_dir = Path(args.output)
+    multiple = len(args.pdfs) > 1
+    total_written = 0
+
+    for pdf_path in args.pdfs:
+        stem = Path(pdf_path).stem
+        if multiple:
+            output_dir = base_dir / stem
+        else:
+            output_dir = base_dir
+        logger.info("=" * 60)
+        logger.info("Processing: %s -> %s/", pdf_path, output_dir)
+        logger.info("=" * 60)
+        total_written += run(pdf_path, output_dir)
+
+    if multiple:
+        logger.info("=" * 60)
+        logger.info("Total: %d biographies écrites dans %s/", total_written, base_dir)
 
 
 if __name__ == "__main__":
