@@ -1,120 +1,118 @@
-# Extracteur de biographies – PDF numérisés
+# Biography Extractor -- Scanned PDFs
 
-Pipeline d'extraction automatique de biographies individuelles à partir de volumes PDF numérisés (type *Biographie Nationale de Belgique*).
+Automated extraction pipeline that segments individual biographies from scanned PDF volumes (e.g. *Biographie Nationale de Belgique*).
 
-## Structure du projet
+## Project Structure
 
 ```
-extract_biographies.py   ← Point d'entrée CLI + orchestrateur
-constants.py             ← Listes de mots, patterns regex, flags PyMuPDF
-config.py                ← Dataclass ExtractionConfig + chargement JSON
-pdf_engine.py            ← Extraction PyMuPDF (spans, lignes, colonnes)
-classifiers.py           ← Détection de début de biographie, faux positifs, renvois
-cleaner.py               ← Nettoyage du texte, extraction des noms, noms de fichiers
-volume1_config.json      ← Configuration spécifique au Volume 1
+extract_biographies.py   <- CLI entry point + orchestrator
+constants.py             <- Word lists, regex patterns, PyMuPDF flags
+config.py                <- ExtractionConfig dataclass + JSON loading
+pdf_engine.py            <- PyMuPDF extraction (spans, lines, columns)
+classifiers.py           <- Biography start detection, false positives, cross-refs
+cleaner.py               <- Text cleaning, name extraction, filename generation
+volume1_config.json      <- Volume 1 specific configuration
 ```
 
-## Utilisation
+## Usage
 
 ```bash
-# Avec détection automatique des pages
+# Auto-detect page boundaries
 python extract_biographies.py BiographieNationale_Volume1.pdf
 
-# Avec configuration manuelle (pages, seuils, corrections OCR)
+# Manual configuration (pages, thresholds, OCR fixes)
 python extract_biographies.py volume1_config.json
 ```
 
-Le type d'entrée est détecté par l'extension : `.json` charge une config complète, `.pdf` utilise les valeurs par défaut avec auto-détection des limites.
+Input type is detected by extension: `.json` loads a full config, `.pdf` uses defaults with automatic boundary detection.
 
-## Flux d'extraction
+## Extraction Flow
 
 ```
 PDF
- │
- ▼
-┌─────────────────────────────────┐
-│  1. detect_boundaries()         │  pdf_engine.py
-│     Scan avant : trouve la      │
-│     première page avec ≥ N      │
-│     débuts de biographie        │
-│     Scan arrière : cherche      │
-│     ERRATA / INDEX / TABLE DES  │
-└────────────┬────────────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  2. extract_page_data()         │  pdf_engine.py
-│     Pour chaque page :          │
-│     - Extraire les spans avec   │
-│       métadonnées (gras,        │
-│       italique, taille, police) │
-│     - Fusionner les lignes par  │
-│       proximité Y (tolérance)   │
-│     - Trier colonne gauche      │
-│       puis droite               │
-└────────────┬────────────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  3. is_biography_start()        │  classifiers.py
-│     Chaîne de validateurs :     │
-│     ┌──────────────────────┐    │
-│     │ 1. Nom gras majuscule│    │
-│     │ 2. Petites caps      │    │
-│     │    espacées (A B B É)│    │
-│     │ 3. Indenté + pattern │    │
-│     │    NOM, ou NOM(      │    │
-│     │ 4. Indenté + italique│    │
-│     │ 5. Nom seul sur ligne│    │
-│     │ 6. Après attribution │    │
-│     │    d'auteur           │    │
-│     └──────────────────────┘    │
-│     Chaque validateur renvoie : │
-│     True  → biographie          │
-│     False → stop (pas une bio)  │
-│     None  → essayer le suivant  │
-└────────────┬────────────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  4. collect_bio_starts()        │  extract_biographies.py
-│     - Filtrer les faux débuts   │
-│       causés par la césure      │
-│     - Fusionner les noms qui    │
-│       continuent sur 2 lignes   │
-│       (particules : VAN, DE…)   │
-└────────────┬────────────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  5. Segmentation & nettoyage    │
-│     - Découper le texte entre   │
-│       chaque début détecté      │
-│     - clean_biography_text()    │  cleaner.py
-│       Recoller les césures,     │
-│       joindre les lignes,       │
-│       appliquer corrections OCR │
-│     - Fusionner les stubs       │
-│       (entrées < 60 car.)       │
-│     - Séparer les entrées       │
-│       fusionnées (Voir… + bio)  │
-└────────────┬────────────────────┘
-             ▼
-┌─────────────────────────────────┐
-│  6. Classification & écriture   │
-│     - is_cross_reference()      │  classifiers.py
-│       → écarter les "Voir X"    │
-│     - is_false_positive()       │  classifiers.py
-│       → écarter fragments,      │
-│         latin, notes de bas     │
-│         de page                 │
-│     - extract_filename()        │  cleaner.py
-│       → nom de fichier sûr     │
-│     - Écrire chaque biographie  │
-│       dans biographies_finales/ │
-│     - Générer rapport_final.log │
-└─────────────────────────────────┘
+ |
+ v
++----------------------------------+
+|  1. detect_boundaries()          |  pdf_engine.py
+|     Forward scan: find first     |
+|     page with >= N biography     |
+|     starts                       |
+|     Backward scan: look for      |
+|     ERRATA / INDEX / TABLE DES   |
++--------------+-------------------+
+               v
++----------------------------------+
+|  2. extract_page_data()          |  pdf_engine.py
+|     For each page:               |
+|     - Extract spans with font    |
+|       metadata (bold, italic,    |
+|       size, font name)           |
+|     - Merge lines by Y-proximity |
+|       (configurable tolerance)   |
+|     - Sort left column then      |
+|       right column               |
++--------------+-------------------+
+               v
++----------------------------------+
+|  3. is_biography_start()         |  classifiers.py
+|     Validator chain:             |
+|     +-------------------------+  |
+|     | 1. Bold uppercase name  |  |
+|     | 2. Spaced small-caps    |  |
+|     |    (A B B E)            |  |
+|     | 3. Indented + name      |  |
+|     |    pattern (NAME, ...)  |  |
+|     | 4. Indented + italic    |  |
+|     | 5. Name alone on line   |  |
+|     | 6. After author         |  |
+|     |    attribution          |  |
+|     +-------------------------+  |
+|     Each validator returns:      |
+|     True  -> biography start     |
+|     False -> stop (not a bio)    |
+|     None  -> try next validator  |
++--------------+-------------------+
+               v
++----------------------------------+
+|  4. collect_bio_starts()         |  extract_biographies.py
+|     - Filter false starts caused |
+|       by hyphenation             |
+|     - Merge names spanning       |
+|       2 lines (particles:        |
+|       VAN, DE, DU...)            |
++--------------+-------------------+
+               v
++----------------------------------+
+|  5. Segmentation & cleaning      |
+|     - Split text between each    |
+|       detected start             |
+|     - clean_biography_text()     |  cleaner.py
+|       Rejoin hyphens, merge      |
+|       lines, apply OCR fixes     |
+|     - Merge stubs                |
+|       (entries < 60 chars)       |
+|     - Split merged entries       |
+|       (cross-ref + bio)          |
++--------------+-------------------+
+               v
++----------------------------------+
+|  6. Classification & output      |
+|     - is_cross_reference()       |  classifiers.py
+|       -> discard "Voir X"        |
+|     - is_false_positive()        |  classifiers.py
+|       -> discard fragments,      |
+|         latin text, footnotes    |
+|     - extract_filename()         |  cleaner.py
+|       -> safe filename           |
+|     - Write each biography to    |
+|       biographies_finales/       |
+|     - Generate rapport_final.log |
++----------------------------------+
 ```
 
 ## Configuration
 
-`ExtractionConfig` (`config.py`) centralise tous les paramètres ajustables. Créer un fichier JSON pour chaque volume :
+`ExtractionConfig` (`config.py`) holds all tunable parameters. Create a JSON file per volume:
 
 ```json
 {
@@ -128,22 +126,22 @@ PDF
 }
 ```
 
-Les clés absentes du JSON prennent les valeurs par défaut. Passer `null` pour `start_page` / `end_page` active l'auto-détection.
+Missing keys fall back to defaults. Set `start_page` / `end_page` to `null` to enable auto-detection.
 
-## Ajout de règles de détection
+## Adding Detection Rules
 
-Les validateurs de début de biographie sont dans la liste `BIO_START_VALIDATORS` (`classifiers.py`). Pour ajouter une règle :
+Biography start validators live in the `BIO_START_VALIDATORS` list (`classifiers.py`). To add a rule:
 
 ```python
 def _check_custom(line_data, cfg, next_line_data, prev_line_data):
-    """Ma nouvelle règle de détection."""
+    """Custom detection rule."""
     # return True / False / None
     ...
 
 BIO_START_VALIDATORS.append(_check_custom)
 ```
 
-## Dépendances
+## Dependencies
 
 - Python 3.10+
 - [PyMuPDF](https://pymupdf.readthedocs.io/) (`pip install PyMuPDF`)
