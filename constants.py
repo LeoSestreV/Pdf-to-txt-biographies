@@ -76,7 +76,7 @@ FRAGMENT_STARTERS = frozenset({
 
 BLACKLISTED_STARTS = frozenset({
     'IDEM', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
-    'HIC', 'LIBER', 'HUJUS', 'DIXIT',
+    'HIC', 'LIBER', 'HUJUS', 'DIXIT', 'QUI', 'QUOD',
 })
 
 LATIN_FRAGMENT_WORDS = frozenset({
@@ -93,6 +93,10 @@ LATIN_INDICATORS = frozenset({
     'ET', 'QUI', 'QUOD', 'HIC', 'EST', 'FUIT', 'OBIIT',
     'ANNO', 'DOMINI', 'JACET', 'CUBAT', 'HUJUS', 'POST',
     'DIXIT', 'PONDUS', 'DOCUIT', 'CULTOR', 'FILIT',
+    'SEDE', 'USQUE', 'ANNUM', 'VIXIT', 'MORTUUS', 'PACE',
+    'AMEN', 'LEGIS', 'NON', 'SANCTA', 'QUIESCAT',
+    'ARTIS', 'DECUS', 'DECANUS', 'QUEM', 'PICTOR',
+    'ALUIT', 'LUGET', 'NATUS', 'AETAT', 'SUÆ',
 })
 
 STANDALONE_PARTICLES = frozenset({

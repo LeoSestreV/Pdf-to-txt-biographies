@@ -8,8 +8,8 @@ from pathlib import Path
 class ExtractionConfig:
     """All tunable parameters for biography extraction.
 
-    Every threshold, size, and document-specific value lives here.
-    Defaults match the Biographie Nationale Volume 1 layout.
+    Layout parameters (header_y, col_boundary, indent ranges) are
+    auto-detected per volume. These defaults are fallbacks.
     """
 
     pdf_path: str = ""
@@ -19,11 +19,16 @@ class ExtractionConfig:
     end_page: int | None = None
 
     end_section_keywords: list[str] = field(default_factory=lambda: [
-        "ERRATA", "TABLE DES", "INDEX",
+        "ERRATA", "TABLE DES MATIÈRES", "TABLE ALPHABÉTIQUE",
+        "TABLE DES", "INDEX",
     ])
 
     min_bio_starts_for_page_detection: int = 3
     end_section_search_pages: int = 30
+    start_page_scan_limit: int = 80
+
+    section_letter_min_size: float = 12.0
+    section_letter_center_tolerance: float = 60.0
 
     header_y: float = 60.0
     footer_y: float = 590.0
@@ -55,7 +60,7 @@ class ExtractionConfig:
     fallback_name_chars: int = 60
     header_lines_count: int = 5
 
-    max_merge_gap_lines: int = 2
+    max_merge_gap_lines: int = 3
     split_part1_min_chars: int = 10
     split_part2_min_chars: int = 50
     author_attrib_max_size: int = 100

@@ -265,6 +265,9 @@ def is_cross_reference(bio_text, cfg: ExtractionConfig):
         return True
     if len(text) < cfg.xref_garbled_max_chars and re.search(r'\bVO[A-Z]{3,}', text):
         return True
+    # OCR variants: A'oir, Voiràr, V oir, Voiràrarticle, etc.
+    if len(text) < cfg.xref_max_chars and re.search(r"[AV]'?[oO]ir", text):
+        return True
     return False
 
 
@@ -301,6 +304,11 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
         if set(re.findall(r'[A-Z]{2,}', sample)) & words['latin_indicators']:
             return True
 
+    # Latin inscriptions with date markers (Anno MDCXXIX, œtatis, etc.)
+    if len(text) < cfg.xref_garbled_max_chars and re.search(
+            r'\b(?:Anno|œtatis|ætatis|obiit|natus)\s+[MDCLXVI]+\b', text, re.IGNORECASE):
+        return True
+
     if first_word_clean in STANDALONE_PARTICLES:
         return True
     if first_word_clean == 'ou' or first_word == 'ou':
@@ -332,6 +340,29 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
         return True
     if re.match(r"^L'[a-z]", text):
         return True
+
+    # First word must look like a name (mostly uppercase, >= 3 chars)
+    if first_word_clean and len(first_word_clean) >= 2:
+        upper_in_first = sum(1 for c in first_word_clean if c.isupper())
+        if upper_in_first / len(first_word_clean) < 0.5:
+            return True
+
+    # Garbled OCR: first word with 3+ consecutive identical characters
+    if first_word_clean and re.search(r'(.)\1{2,}', first_word_clean):
+        return True
+
+    # Engraving/printing attributions: "NAME sculp.", "NAME fecit", etc.
+    if re.match(r'^[A-ZÀ-Þ]+\s+(?:sculp|fecit|excudit|del|inv|pinx)\b', text):
+        return True
+
+    # Latin inscription fragments: name followed by many Latin words
+    first_line = text.split('\n')[0] if '\n' in text else text[:200]
+    first_line_words = re.findall(r'[A-ZÀ-Þa-zà-ÿ]{3,}', first_line)
+    if len(first_line_words) >= 5:
+        latin_count = sum(1 for w in first_line_words
+                         if w.upper() in words['latin_indicators'])
+        if latin_count >= 3:
+            return True
 
     return False
 

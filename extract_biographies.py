@@ -74,6 +74,11 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
                     prev_text = all_lines[next_gidx - 1][2]['full_text'] if next_gidx - 1 >= 0 else ''
                     if is_name_continuation(prev_text, next_ld['full_text']):
                         skip_next = True
+                    # Name links (surnommé, dit, etc.) in between text
+                    elif any(f' {link} ' in between_text.lower()
+                             for link in ('surnommé', 'dit', 'dite',
+                                          'nommé', 'appelé')):
+                        skip_next = True
 
         merged.append((gidx, pidx, ld))
 
@@ -87,6 +92,15 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
         for gidx, _, ld in all_lines
         if start_gidx <= gidx < end_gidx
     ]
+
+
+def _get_bio_first_letter(bio_text):
+    """Extract the first alphabetic letter of a biography's name."""
+    text = bio_text.strip().lstrip('*').strip()
+    for ch in text:
+        if ch.isalpha():
+            return ch.upper()
+    return None
 
 
 def run(pdf_path: str, output_dir: Path):
@@ -105,7 +119,10 @@ def run(pdf_path: str, output_dir: Path):
     logger.info("Auto-détection du layout...")
     auto_detect_layout(doc, cfg)
 
-    start_page, end_page = detect_boundaries(doc, cfg)
+    start_page, end_page, volume_letters = detect_boundaries(doc, cfg)
+    if volume_letters:
+        logger.info("Lettres attendues pour ce volume: %s",
+                     ', '.join(sorted(volume_letters)))
     logger.info("Pages traitées : %d à %d", start_page + 1, end_page)
 
     logger.info("Extracting text with font metadata...")
@@ -161,6 +178,12 @@ def run(pdf_path: str, output_dir: Path):
         if is_false_positive(bio_text, cfg, words):
             skipped_false += 1
             continue
+        # Reject entries whose first letter is outside the volume's range
+        if volume_letters:
+            first_letter = _get_bio_first_letter(bio_text)
+            if first_letter and first_letter not in volume_letters:
+                skipped_false += 1
+                continue
 
         filename = extract_filename(bio_text, raw_lines, cfg, words)
 
