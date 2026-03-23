@@ -231,16 +231,24 @@ def _verify_section_letter(doc, page_idx, candidate_letter, cfg):
     return candidate_letter
 
 
-def scan_section_letters(doc, cfg):
+def scan_section_letters_raw(doc, cfg):
     page_width = doc[0].rect.width
     letters = []
     for i in range(len(doc)):
         letter = _is_section_letter(doc[i], page_width, cfg)
         if letter:
-            verified = _verify_section_letter(doc, i, letter, cfg)
-            if not letters or verified != letters[-1][1]:
-                letters.append((i, verified))
+            if not letters or letter != letters[-1][1]:
+                letters.append((i, letter))
     return letters
+
+
+def verify_section_letters(doc, cfg, raw_letters):
+    verified = []
+    for page_idx, letter in raw_letters:
+        corrected = _verify_section_letter(doc, page_idx, letter, cfg)
+        if not verified or corrected != verified[-1][1]:
+            verified.append((page_idx, corrected))
+    return verified
 
 
 def get_volume_letter_range(section_letters):
@@ -364,7 +372,7 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
                 logger.info("Suite volume: starts with '%s' (p.%d)", suite_letter, i + 1)
                 break
 
-    all_section_letters = scan_section_letters(doc, cfg)
+    raw_section_letters = scan_section_letters_raw(doc, cfg)
 
     suite_page = None
     if suite_letter:
@@ -377,20 +385,20 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
     end = cfg.end_page
 
     if start is None:
-        start = find_biography_start_page(doc, cfg, all_section_letters, fm_end, suite_page)
+        start = find_biography_start_page(doc, cfg, raw_section_letters, fm_end, suite_page)
     if end is None:
         end = find_biography_end_page(doc, cfg, start)
 
-    section_letters = [(p, l) for p, l in all_section_letters if start <= p < end]
+    raw_in_range = [(p, l) for p, l in raw_section_letters if start <= p < end]
 
     if suite_letter:
-        if not section_letters or section_letters[0][1] != suite_letter:
-            section_letters = [(start, suite_letter)] + section_letters
+        if not raw_in_range or raw_in_range[0][1] != suite_letter:
+            raw_in_range = [(start, suite_letter)] + raw_in_range
 
-    if section_letters:
-        first_letter = section_letters[0][1]
-        table_des_start = None
-        for p, l in section_letters[1:]:
+    table_des_start = None
+    if raw_in_range:
+        first_letter = raw_in_range[0][1]
+        for p, l in raw_in_range[1:]:
             if l < first_letter:
                 table_des_start = p
                 logger.info("TABLE DES detected at page %d (marker '%s' < '%s')",
@@ -398,8 +406,10 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
                 break
         if table_des_start:
             end = min(end, table_des_start)
-            section_letters = [(p, l) for p, l in section_letters if p < table_des_start]
+            raw_in_range = [(p, l) for p, l in raw_in_range if p < table_des_start]
             logger.info("End adjusted to page %d (before TABLE DES)", end)
+
+    section_letters = verify_section_letters(doc, cfg, raw_in_range)
 
     if section_letters:
         logger.info("Section markers (in range): %s",
