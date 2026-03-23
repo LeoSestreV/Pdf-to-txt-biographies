@@ -1,5 +1,3 @@
-"""Text cleaning, name extraction, and filename generation."""
-
 import re
 
 from config import ExtractionConfig
@@ -9,7 +7,6 @@ from constants import (
 
 
 def collapse_spaced_names(text):
-    """Collapse 'A B B E' -> 'ABBE'."""
     def _collapse(m):
         prefix = m.group(1) or ''
         spaced = m.group(0)[len(prefix):]
@@ -22,7 +19,6 @@ def collapse_spaced_names(text):
 
 
 def clean_biography_text(raw_lines, cfg: ExtractionConfig):
-    """Clean biography text into continuous flowing text."""
     text = collapse_spaced_names('\n'.join(raw_lines))
 
     text = re.sub(
@@ -46,7 +42,6 @@ def clean_biography_text(raw_lines, cfg: ExtractionConfig):
 
 
 def _join_header_lines(raw_lines, cfg: ExtractionConfig):
-    """Join first few lines handling hyphenation for name extraction."""
     header_lines = [
         collapse_spaced_names(line.strip())
         for line in raw_lines[:cfg.header_lines_count]
@@ -73,9 +68,9 @@ def _join_header_lines(raw_lines, cfg: ExtractionConfig):
 
 
 def _find_name_end(joined, words: dict):
-    """Find the end position of the name in the joined header text."""
     descriptors = words['descriptors']
     paren_depth = 0
+    paren_start = -1
     i = 0
     while i < len(joined):
         ch = joined[i]
@@ -86,6 +81,8 @@ def _find_name_end(joined, words: dict):
                 while pos > 0 and joined[pos - 1] in ' ,':
                     pos -= 1
                 return pos
+            if paren_depth == 0:
+                paren_start = i
             paren_depth += 1
             i += 1
             continue
@@ -93,6 +90,16 @@ def _find_name_end(joined, words: dict):
             paren_depth = max(0, paren_depth - 1)
             i += 1
             continue
+
+        if paren_depth > 0 and paren_start >= 0 and (i - paren_start) > 40:
+            if i > 0 and joined[i - 1] in ' ,':
+                word_match = re.match(
+                    r'[a-zàáâãäåæçèéêëìíîïðñòóôõöùúûüýþé]+', joined[i:])
+                if word_match and word_match.group(0) in descriptors:
+                    pos = paren_start
+                    while pos > 0 and joined[pos - 1] in ' ,':
+                        pos -= 1
+                    return pos
 
         if paren_depth == 0:
             if ch == '.' and i + 1 < len(joined) and joined[i + 1] == ' ':
@@ -122,7 +129,6 @@ def _find_name_end(joined, words: dict):
 
 
 def extract_name_from_lines(raw_lines, cfg: ExtractionConfig, words: dict):
-    """Extract the biography name from raw lines."""
     joined = _join_header_lines(raw_lines, cfg)
     if not joined:
         return ''
@@ -147,7 +153,6 @@ def extract_name_from_lines(raw_lines, cfg: ExtractionConfig, words: dict):
 
 
 def fix_ocr_spacing(name, cfg: ExtractionConfig):
-    """Fix OCR artifacts that insert spaces within words."""
     def collapse_spaced_word(m):
         return m.group(0).replace(' ', '')
 
@@ -171,7 +176,6 @@ def fix_ocr_spacing(name, cfg: ExtractionConfig):
 
 
 def clean_filename_trailing(name):
-    """Remove trailing incomplete phrases from filenames."""
     for pat in TRAILING_PATTERNS:
         name = re.sub(pat, '', name, flags=re.IGNORECASE)
 
@@ -188,7 +192,6 @@ def clean_filename_trailing(name):
 
 
 def extract_filename(bio_text, raw_lines, cfg: ExtractionConfig, words: dict):
-    """Extract filesystem-safe filename from biography text."""
     name = (extract_name_from_lines(raw_lines, cfg, words) or
             bio_text.split(',')[0].strip()[:cfg.fallback_name_chars])
     name = name.rstrip('.')

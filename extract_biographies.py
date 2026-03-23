@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-Extract biographies from scanned PDF volumes of biographical dictionaries.
-
-Uses PyMuPDF font metadata (bold detection) combined with text pattern matching
-and indentation analysis to reliably segment biography entries.
-Automatically detects all PDFs in BioPdf/ and layout parameters per volume.
-
-Usage:
-    python extract_biographies.py
-"""
-
 import argparse
 import logging
 import re
@@ -34,7 +23,6 @@ OUTPUT_DIR = "biographies_finales"
 
 
 def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: int):
-    """Scan biography pages [start_page, end_page) and collect starts."""
     all_lines = []
     for pidx in range(start_page, end_page):
         for ld in extract_page_data(doc[pidx], pidx, cfg):
@@ -49,8 +37,11 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
 
     bio_starts = [
         (gidx, pidx, ld) for gidx, pidx, ld in bio_starts
-        if gidx == 0 or not re.search(rf'[{UC}]{{2,}}-$',
-                                       all_lines[gidx - 1][2]['full_text'].rstrip())
+        if gidx == 0 or (
+            not re.search(rf'[{UC}]{{2,}}-$',
+                          all_lines[gidx - 1][2]['full_text'].rstrip()) and
+            not re.search(r'\bVoir\s*$', all_lines[gidx - 1][2]['full_text'].rstrip())
+        )
     ]
 
     merged = []
@@ -74,7 +65,6 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
                     prev_text = all_lines[next_gidx - 1][2]['full_text'] if next_gidx - 1 >= 0 else ''
                     if is_name_continuation(prev_text, next_ld['full_text']):
                         skip_next = True
-                    # Name links (surnommé, dit, etc.) in between text
                     elif any(f' {link} ' in between_text.lower()
                              for link in ('surnommé', 'dit', 'dite',
                                           'nommé', 'appelé')):
@@ -86,7 +76,6 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
 
 
 def extract_bio_text(all_lines, start_gidx, end_gidx):
-    """Extract the raw text lines between two global line indices."""
     return [
         ld['full_text']
         for gidx, _, ld in all_lines
@@ -95,7 +84,6 @@ def extract_bio_text(all_lines, start_gidx, end_gidx):
 
 
 def _get_bio_first_letter(bio_text):
-    """Extract the first alphabetic letter of a biography's name."""
     text = bio_text.strip().lstrip('*').strip()
     for ch in text:
         if ch.isalpha():
@@ -104,10 +92,9 @@ def _get_bio_first_letter(bio_text):
 
 
 def run(pdf_path: str, output_dir: Path):
-    """Run the full extraction pipeline for a single PDF."""
     path = Path(pdf_path)
     if not path.exists():
-        raise SystemExit(f"Erreur: le fichier {pdf_path} n'existe pas.")
+        raise SystemExit(f"Error: file {pdf_path} does not exist.")
 
     cfg = ExtractionConfig(pdf_path=pdf_path)
     words = build_word_sets(cfg)
@@ -116,28 +103,19 @@ def run(pdf_path: str, output_dir: Path):
     doc = fitz.open(str(path))
     logger.info("Total pages: %d", len(doc))
 
-    logger.info("Auto-détection du layout...")
     auto_detect_layout(doc, cfg)
 
     start_page, end_page, volume_letters = detect_boundaries(doc, cfg)
-    if volume_letters:
-        logger.info("Lettres attendues pour ce volume: %s",
-                     ', '.join(sorted(volume_letters)))
-    logger.info("Pages traitées : %d à %d", start_page + 1, end_page)
+    logger.info("Processing pages: %d to %d", start_page + 1, end_page)
 
-    logger.info("Extracting text with font metadata...")
     all_lines, bio_starts = collect_bio_starts(doc, cfg, start_page, end_page)
-    logger.info("Total text lines extracted: %d", len(all_lines))
-    logger.info("Biography starts detected: %d", len(bio_starts))
+    logger.info("Text lines: %d | Bio starts: %d", len(all_lines), len(bio_starts))
 
-    logger.info("Segmenting biographies...")
     biographies = []
     for i, (gidx, pidx, ld) in enumerate(bio_starts):
         end_gidx = bio_starts[i + 1][0] if i + 1 < len(bio_starts) else len(all_lines)
         raw_lines = extract_bio_text(all_lines, gidx, end_gidx)
         biographies.append((clean_biography_text(raw_lines, cfg), raw_lines))
-
-    logger.info("Biographies segmented: %d", len(biographies))
 
     merged_bios = []
     i = 0
@@ -154,7 +132,6 @@ def run(pdf_path: str, output_dir: Path):
             merged_bios.append((bio_text, raw_lines))
             i += 1
     biographies = merged_bios
-    logger.info("After merging stubs: %d", len(biographies))
 
     biographies = [
         entry
@@ -178,7 +155,6 @@ def run(pdf_path: str, output_dir: Path):
         if is_false_positive(bio_text, cfg, words):
             skipped_false += 1
             continue
-        # Reject entries whose first letter is outside the volume's range
         if volume_letters:
             first_letter = _get_bio_first_letter(bio_text)
             if first_letter and first_letter not in volume_letters:
@@ -197,47 +173,33 @@ def run(pdf_path: str, output_dir: Path):
         (output_dir / filename).write_text(bio_text, encoding='utf-8')
         written += 1
 
-    logger.info("Terminé!")
-    logger.info("  %d biographies écrites dans %s/", written, output_dir)
-    logger.info("  %d renvois ignorés", skipped_xrefs)
-    logger.info("  %d faux positifs ignorés", skipped_false)
+    logger.info("Done! %d biographies written to %s/", written, output_dir)
+    logger.info("  %d cross-references skipped | %d false positives skipped",
+                skipped_xrefs, skipped_false)
     return written
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Extract biographies from scanned PDF biographical dictionaries.",
-        epilog="Examples:\n"
-               "  %(prog)s                    # auto-detect all PDFs in BioPdf/\n"
-               "  %(prog)s -i my_pdfs/        # custom input directory\n",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "-i", "--input",
-        default=INPUT_DIR,
-        help=f"Input directory containing PDF files (default: {INPUT_DIR})",
-    )
-    parser.add_argument(
-        "-o", "--output",
-        default=OUTPUT_DIR,
-        help=f"Base output directory (default: {OUTPUT_DIR})",
-    )
+    parser.add_argument("-i", "--input", default=INPUT_DIR,
+                        help=f"Input directory containing PDFs (default: {INPUT_DIR})")
+    parser.add_argument("-o", "--output", default=OUTPUT_DIR,
+                        help=f"Output directory (default: {OUTPUT_DIR})")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     input_dir = Path(args.input)
     if not input_dir.is_dir():
-        raise SystemExit(f"Erreur: le dossier {input_dir} n'existe pas.")
+        raise SystemExit(f"Error: directory {input_dir} does not exist.")
 
     pdfs = sorted(input_dir.glob("*.pdf"))
     if not pdfs:
-        raise SystemExit(f"Erreur: aucun PDF trouvé dans {input_dir}/")
+        raise SystemExit(f"Error: no PDFs found in {input_dir}/")
 
-    logger.info("Trouvé %d PDF(s) dans %s/", len(pdfs), input_dir)
+    logger.info("Found %d PDF(s) in %s/", len(pdfs), input_dir)
     base_dir = Path(args.output)
     total_written = 0
 
@@ -249,7 +211,7 @@ def main():
         total_written += run(str(pdf_path), output_dir)
 
     logger.info("=" * 60)
-    logger.info("Total: %d biographies écrites dans %s/", total_written, base_dir)
+    logger.info("Total: %d biographies written to %s/", total_written, base_dir)
 
 
 if __name__ == "__main__":

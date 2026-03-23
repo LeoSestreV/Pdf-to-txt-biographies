@@ -1,5 +1,3 @@
-"""Static word lists, patterns, and constants for biography extraction."""
-
 PYMUPDF_BOLD_BIT = 1 << 4
 PYMUPDF_ITALIC_BIT = 1 << 1
 
@@ -8,7 +6,8 @@ UC = r'A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞ'
 DESCRIPTORS = frozenset({
     'abbé', 'abbesse', 'administrateur', 'agronome', 'amiral', 'ancien',
     'annaliste', 'antiquaire', 'apôtre', 'architecte', 'archéologue',
-    'arrière', 'artisan', 'artiste', 'artistes', 'astronome', 'auteur',
+    'archidiacre', 'archiduchesse', 'archevêque', 'arrière',
+    'artisan', 'artiste', 'artistes', 'astronome', 'auteur',
     'baron', 'baronne', 'bienfaiteur', 'bienheureux', 'biographe',
     'bourgmestre', 'bourgeois', 'bénédictin', 'belge',
     'calligraphe', 'calligraphes', 'capitaine', 'cardinal', 'cartographe',
@@ -18,37 +17,43 @@ DESCRIPTORS = frozenset({
     'compilateur', 'compositeur', 'comte', 'comtesse', 'confesseur',
     'conseiller', 'constructeur', 'consul', 'controversiste', 'coseigneur',
     'curé',
-    'dame', 'dessinateur', 'diplomate', 'directeur', 'docteur', 'dominicain',
-    'dont', 'doyen', 'duc', 'duchesse', 'décédé', 'défenseur',
-    'ecclésiastique', 'empereur', 'enseigna', 'ermite', 'escrimeur',
-    'est', 'ethnologue', 'exploitant',
+    'dame', 'dessinateur', 'diacre', 'diplomate', 'directeur', 'docteur',
+    'dominicain', 'dont', 'doyen', 'duc', 'duchesse', 'décédé', 'défenseur',
+    'ecclésiastique', 'empereur', 'enseigna', 'envoyé', 'ermite',
+    'escrimeur', 'est', 'ethnologue', 'exploitant',
     'évêque', 'écolâtre', 'écrivain', 'érudit', 'époux', 'épouse', 'était',
-    'facteur', 'feld', 'feldmaréchal', 'femme', 'fils', 'financier', 'fille',
-    'florissait', 'fondateur', 'fondatrice', 'forme', 'frère', 'fut',
+    'facteur', 'famille', 'feld', 'feldmaréchal', 'femme', 'fils',
+    'financier', 'fille', 'florissait', 'fondateur', 'fondatrice', 'forme',
+    'frère', 'fut',
     'gardien', 'gentilhomme', 'gouverneur', 'grammairien', 'graveur',
     'greffier', 'guerrier', 'général', 'géographe', 'géologue',
     'hagiographe', 'helléniste', 'héraldiste', 'historien', 'homme',
     'humaniste', 'hébraïsant',
-    'il', 'imprimeur', 'industriel', 'ingénieur', 'instituteur',
+    'il', 'imprimeur', 'industriel', 'infante', 'infant', 'ingénieur',
+    'instituteur',
     'jésuite', 'jurisconsulte', 'juriste',
     'lazariste', 'lecteur', 'libraire', 'licencié', 'littérateur',
     'lieutenant', 'luthiste',
     'magistrat', 'major', 'marchand', 'marquis', 'maréchal',
     'mathématicien', 'maître', 'membre', 'militaire', 'minéralogiste',
-    'ministre', 'missionnaire', 'moine', 'moraliste', 'musicien', 'médecin',
-    'ménestrel',
-    'naquit', 'navigateur', 'neveu', 'noble', 'nommé', 'notaire', 'né',
-    'née', 'négociateur',
+    'ministre', 'missionnaire', 'moine', 'moraliste', 'musicien',
+    'mère', 'médecin', 'ménestrel',
+    'naquit', 'natif', 'native', 'navigateur', 'neveu', 'noble', 'nommé',
+    'notaire', 'né', 'née', 'négociateur', 'numismate',
     'officier', 'on', 'organiste', 'orientaliste', 'ornithologue',
-    'patriote', 'patron', 'peintre', 'peintres', 'personnage', 'philologue',
-    'philosophe', 'physicien', 'plus', 'poète', 'poëte', 'prédicateur',
-    'président', 'prêtre', 'prince', 'princesse', 'prieur', 'procureur',
-    'professeur', 'protonotaire', 'prévôt', 'publiciste',
+    'parti', 'partit', 'patriarche', 'patriote', 'patron',
+    'peintre', 'peintres', 'père', 'près',
+    'personnage', 'philologue', 'philosophe', 'physicien', 'plus',
+    'poète', 'poëte', 'poétesse', 'prédicateur', 'prélat', 'président',
+    'prêtre',
+    'prince', 'princesse', 'prieur', 'procureur', 'professeur',
+    'protonotaire', 'prévôt', 'publiciste',
     'recteur', 'religieux', 'religieuse', 'roi', 'reine', 'récollet',
     'savant', 'sculpteur', 'secrétaire', 'seigneur', 'sénateur', 'sire',
-    'soldat', 'statuaire', 'successivement', 'surnommé',
+    'soldat', 'souveraine', 'souverain', 'statuaire', 'succéda',
+    'successivement', 'surnommé',
     'théologien', 'théoricien', 'topographe', 'trouvère',
-    'vicaire', 'vit', 'vivait', 'voyageur',
+    'vicaire', 'village', 'vit', 'vivait', 'voyageur',
     'premier', 'première', 'deuxième', 'troisième', 'quatrième',
     'cinquième', 'sixième', 'septième', 'huitième', 'neuvième',
     'dixième', 'onzième', 'douzième', 'treizième', 'quatorzième',
@@ -77,6 +82,7 @@ FRAGMENT_STARTERS = frozenset({
 BLACKLISTED_STARTS = frozenset({
     'IDEM', 'DOMINUS', 'FEBRUARII', 'ITEM', 'ANNO', 'OBIIT',
     'HIC', 'LIBER', 'HUJUS', 'DIXIT', 'QUI', 'QUOD',
+    'BIBLIOGRAPHIE', 'BIBLIOTHECA', 'BIBLIOTHÈQUE',
 })
 
 LATIN_FRAGMENT_WORDS = frozenset({
@@ -129,9 +135,14 @@ NAME_CONTINUATION_PAIRS = frozenset({
     'dite la', 'dite le', 'nommé le', 'nommé la',
 })
 
+GREEK_TO_LATIN = {
+    'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H',
+    'Ι': 'I', 'Κ': 'K', 'Μ': 'M', 'Ν': 'N', 'Ο': 'O',
+    'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+}
+
 
 def build_word_sets(cfg):
-    """Build effective word sets by merging base sets with config extras."""
     return {
         'descriptors': DESCRIPTORS | frozenset(cfg.extra_descriptors),
         'blacklisted': BLACKLISTED_STARTS | frozenset(cfg.extra_blacklisted_starts),

@@ -1,17 +1,14 @@
-"""PyMuPDF-based PDF text extraction with font metadata."""
-
 import logging
 import re
 from collections import Counter
 
 from config import ExtractionConfig
-from constants import PYMUPDF_BOLD_BIT, PYMUPDF_ITALIC_BIT
+from constants import PYMUPDF_BOLD_BIT, PYMUPDF_ITALIC_BIT, GREEK_TO_LATIN
 
 logger = logging.getLogger(__name__)
 
 
 def _extract_spans(line):
-    """Extract non-empty spans with font metadata from a PDF line object."""
     return [
         {
             'text': s['text'],
@@ -26,9 +23,7 @@ def _extract_spans(line):
 
 
 def _merge_span_groups(groups):
-    """Merge grouped span lists into final line data objects."""
     groups.sort(key=lambda g: (0 if g[3] else 1, g[0], g[1]))
-
     lines_data = []
     for min_y, min_x, spans_list, _is_left in groups:
         spans_list.sort(key=lambda t: t[0])
@@ -44,7 +39,6 @@ def _merge_span_groups(groups):
                         'size': 0, 'font': '',
                     })
             merged_spans.extend(sp)
-
         full_text = ''.join(s['text'] for s in merged_spans).strip()
         lines_data.append({
             'y': min_y,
@@ -58,11 +52,6 @@ def _merge_span_groups(groups):
 
 
 def extract_page_data(page, page_idx, cfg: ExtractionConfig):
-    """Extract text spans with metadata from a page.
-
-    Merges line objects that share the same y-position (within tolerance)
-    into a single logical line, sorted by x-position.
-    """
     raw_lines = []
     for b in page.get_text('dict')['blocks']:
         if 'lines' not in b:
@@ -74,7 +63,6 @@ def extract_page_data(page, page_idx, cfg: ExtractionConfig):
             spans = _extract_spans(line)
             if spans:
                 raw_lines.append((y_top, line['bbox'][0], spans))
-
     raw_lines.sort(key=lambda t: (t[0], t[1]))
 
     groups = []
@@ -98,13 +86,6 @@ def extract_page_data(page, page_idx, cfg: ExtractionConfig):
 
 
 def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
-    """Analyze PDF pages to auto-detect column boundary and indent ranges.
-
-    Samples content pages to find:
-    - col_boundary: gap between left and right column X positions
-    - header_y: Y below which lines are running headers
-    - left_col_indent / right_col_indent: X ranges for biography start indentation
-    """
     total = len(doc)
     if sample_range is None:
         start = max(0, total // 5)
@@ -135,12 +116,11 @@ def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
                             upper = sum(1 for c in clean if c.isupper())
                             if upper / len(clean) > 0.5:
                                 bold_x.append(int(x))
-                    break  # only first span per line
+                    break
 
     if not all_x:
         return
 
-    # Find column boundary: largest gap in X distribution between 200-350
     x_counts = Counter(all_x)
     buckets = {}
     for x, cnt in x_counts.items():
@@ -158,11 +138,8 @@ def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
             best_gap_start = sorted_buckets[i]
 
     if best_gap_size >= 15:
-        col_boundary = best_gap_start + best_gap_size // 2
-        cfg.col_boundary = float(col_boundary)
-        logger.info("  col_boundary auto-détecté: %.0f", cfg.col_boundary)
+        cfg.col_boundary = float(best_gap_start + best_gap_size // 2)
 
-    # Auto-detect header_y: find the Y below which very few lines appear
     y_counts = Counter(all_y)
     sorted_y = sorted(y_counts.keys())
     if sorted_y:
@@ -170,10 +147,8 @@ def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
             gap = sorted_y[i + 1] - sorted_y[i]
             if gap >= 15 and sorted_y[i] < 100:
                 cfg.header_y = float(sorted_y[i] + gap // 2)
-                logger.info("  header_y auto-détecté: %.0f", cfg.header_y)
                 break
 
-    # Auto-detect indent ranges from bold biography name positions
     def _indent_range(positions):
         if len(positions) < 3:
             return None
@@ -191,27 +166,15 @@ def auto_detect_layout(doc, cfg: ExtractionConfig, sample_range=None):
     if bold_x:
         left_bold = [x for x in bold_x if x < cfg.col_boundary]
         right_bold = [x for x in bold_x if x >= cfg.col_boundary]
-
         r = _indent_range(left_bold)
         if r:
             cfg.left_col_indent = r
-            logger.info("  left_col_indent auto-détecté: (%.0f, %.0f)", *cfg.left_col_indent)
-
         r = _indent_range(right_bold)
         if r:
             cfg.right_col_indent = r
-            logger.info("  right_col_indent auto-détecté: (%.0f, %.0f)", *cfg.right_col_indent)
 
 
 def _is_section_letter(page, page_width, cfg):
-    """Check if a page contains a section letter marker (e.g. 'A', 'B').
-
-    Section letters are isolated uppercase letters, large (>= 12pt),
-    roughly centered on the page, that mark the beginning of an
-    alphabetic section in the biography volume.
-
-    Returns the letter if found, None otherwise.
-    """
     page_center = page_width / 2
     for b in page.get_text('dict')['blocks']:
         if 'lines' not in b:
@@ -224,20 +187,10 @@ def _is_section_letter(page, page_width, cfg):
                 t = s['text'].strip()
                 if not t or len(t) != 1 or not t.isalpha():
                     continue
-                # Must be a Latin letter A-Z (including accented equivalents)
-                # Exclude Greek letters and isolated Roman numeral 'I'
                 if t in ('I', 'V', 'X', 'L', 'C', 'D', 'M'):
-                    # Only accept I/V/X/etc. if bold -- a real section marker
-                    # is typically bold while roman numerals in front matter are not
                     if not (s['flags'] & PYMUPDF_BOLD_BIT):
                         continue
-                # Normalize Greek lookalikes from OCR (Β->B, Α->A, etc.)
-                _GREEK_TO_LATIN = {
-                    'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H',
-                    'Ι': 'I', 'Κ': 'K', 'Μ': 'M', 'Ν': 'N', 'Ο': 'O',
-                    'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
-                }
-                t = _GREEK_TO_LATIN.get(t, t)
+                t = GREEK_TO_LATIN.get(t, t)
                 if ord(t) > 0x024F:
                     continue
                 if s['size'] < cfg.section_letter_min_size:
@@ -248,13 +201,15 @@ def _is_section_letter(page, page_width, cfg):
     return None
 
 
-def _verify_section_letter(doc, page_idx, candidate_letter, cfg):
-    """Verify a section letter by checking biography names on nearby pages.
+def _detect_suite_letter(page):
+    text = page.get_text('text').strip()
+    m = re.match(r'^([A-Z])\s*\(suite\)', text, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    return None
 
-    OCR can confuse letters (C→G, O→Q, etc.). Cross-check the candidate
-    against the first letters of bold biography names on the same/next page.
-    Returns the corrected letter.
-    """
+
+def _verify_section_letter(doc, page_idx, candidate_letter, cfg):
     from classifiers import is_biography_start
     for check_page in range(page_idx, min(page_idx + 2, len(doc))):
         page_lines = extract_page_data(doc[check_page], check_page, cfg)
@@ -268,8 +223,7 @@ def _verify_section_letter(doc, page_idx, candidate_letter, cfg):
                         bio_letter = ch.upper()
                         if bio_letter != candidate_letter:
                             logger.info(
-                                "  Correction OCR: marqueur '%s' (p.%d) → '%s' "
-                                "(d'après biographies)",
+                                "  OCR correction: marker '%s' (p.%d) -> '%s'",
                                 candidate_letter, page_idx + 1, bio_letter,
                             )
                             return bio_letter
@@ -278,11 +232,6 @@ def _verify_section_letter(doc, page_idx, candidate_letter, cfg):
 
 
 def scan_section_letters(doc, cfg):
-    """Scan all pages to find section letter markers and return them in order.
-
-    Returns a list of (page_index, letter) tuples, e.g. [(41, 'A'), (250, 'B')].
-    Section letters are verified against actual biography names to correct OCR errors.
-    """
     page_width = doc[0].rect.width
     letters = []
     for i in range(len(doc)):
@@ -295,11 +244,6 @@ def scan_section_letters(doc, cfg):
 
 
 def get_volume_letter_range(section_letters):
-    """Determine the expected letter range from section letter markers.
-
-    Returns a set of uppercase letters that biographies in this volume
-    should start with (including letters between the first and last marker).
-    """
     if not section_letters:
         return None
     first = ord(section_letters[0][1])
@@ -307,50 +251,59 @@ def get_volume_letter_range(section_letters):
     return set(chr(c) for c in range(first, last + 1))
 
 
-def find_biography_start_page(doc, cfg, section_letters=None):
-    """Find the first page where biographies begin using section letter markers.
+def _find_front_matter_end(doc, cfg):
+    last_fm_page = -1
+    limit = min(len(doc), cfg.start_page_scan_limit)
+    for i in range(limit):
+        text = doc[i].get_text('text').upper()
+        if any(kw.upper() in text for kw in cfg.front_matter_keywords):
+            last_fm_page = i
+        elif last_fm_page >= 0:
+            break
+    return last_fm_page
 
-    Scans from page 0, looking for a page with:
-    1. An isolated, large, centered uppercase letter (section marker)
-    2. Followed by biography content on the same page or the next
 
-    Falls back to the old method (counting bio starts) if no marker is found.
-    """
+def find_biography_start_page(doc, cfg, section_letters=None, fm_end=-1, suite_page=None):
     from classifiers import is_biography_start
 
-    if section_letters:
-        first_page = section_letters[0][0]
-        first_letter = section_letters[0][1]
-        # Verify: this page or the next must contain biography starts
+    if suite_page is not None:
+        logger.info("Suite marker found at page %d (PDF %d)", suite_page, suite_page + 1)
+        return suite_page
+
+    near_front = [s for s in (section_letters or []) if s[0] < max(fm_end + 20, 50)]
+    if near_front:
+        first_page, first_letter = near_front[0]
         for check_page in range(first_page, min(first_page + 2, len(doc))):
             page_lines = extract_page_data(doc[check_page], check_page, cfg)
-            bio_count = 0
-            for j, ld in enumerate(page_lines):
-                next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
-                prev_ld = page_lines[j - 1] if j > 0 else None
-                if is_biography_start(ld, cfg, next_ld, prev_ld):
-                    bio_count += 1
+            bio_count = sum(
+                1 for j, ld in enumerate(page_lines)
+                if is_biography_start(
+                    ld, cfg,
+                    page_lines[j + 1] if j + 1 < len(page_lines) else None,
+                    page_lines[j - 1] if j > 0 else None,
+                )
+            )
             if bio_count >= 1:
                 logger.info(
-                    "Marqueur de section '%s' trouvé page %d (PDF %d) "
-                    "avec %d biographie(s)",
+                    "Section marker '%s' found at page %d (PDF %d) with %d bio(s)",
                     first_letter, first_page, first_page + 1, bio_count,
                 )
                 return first_page
 
-    # Fallback: find first page with enough bio starts
-    logger.info("Aucun marqueur de section trouvé, fallback sur comptage...")
-    for i in range(len(doc)):
+    search_start = max(0, fm_end + 1) if fm_end >= 0 else 0
+    for i in range(search_start, len(doc)):
         page_lines = extract_page_data(doc[i], i, cfg)
-        bio_count = 0
-        for j, ld in enumerate(page_lines):
-            next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
-            prev_ld = page_lines[j - 1] if j > 0 else None
-            if is_biography_start(ld, cfg, next_ld, prev_ld):
-                bio_count += 1
-        if bio_count >= cfg.min_bio_starts_for_page_detection:
+        bio_count = sum(
+            1 for j, ld in enumerate(page_lines)
+            if is_biography_start(
+                ld, cfg,
+                page_lines[j + 1] if j + 1 < len(page_lines) else None,
+                page_lines[j - 1] if j > 0 else None,
+            )
+        )
+        if bio_count >= 1:
             logger.info(
-                "Début détecté (fallback): page %d (PDF %d) [%d biographies]",
+                "Start detected (fallback): page %d (PDF %d) [%d bio(s)]",
                 i, i + 1, bio_count,
             )
             return i
@@ -359,12 +312,6 @@ def find_biography_start_page(doc, cfg, section_letters=None):
 
 
 def find_biography_end_page(doc, cfg, start_page):
-    """Find the last page of biographies.
-
-    Scans backward from the end, looking for end-section keywords
-    (ERRATA, TABLE DES MATIÈRES, TABLE ALPHABÉTIQUE, INDEX) only
-    in the last N pages to avoid false matches in body text.
-    """
     total = len(doc)
     keywords_upper = [kw.upper() for kw in cfg.end_section_keywords]
     search_start = max(start_page, total - cfg.end_section_search_pages)
@@ -377,43 +324,110 @@ def find_biography_end_page(doc, cfg, start_page):
             end = i
             found_end = True
         elif found_end:
-            logger.info("Fin détectée : page %d (PDF %d)", end - 1, end)
+            logger.info("End detected: page %d (PDF %d)", end - 1, end)
             break
 
     if not found_end:
-        logger.info("Aucune section de fin détectée, dernière page: %d", total)
+        logger.info("No end section found, using last page: %d", total)
 
     return end
 
 
+def _infer_first_letter(doc, start_page, cfg):
+    from classifiers import is_biography_start
+    for i in range(start_page, min(start_page + 5, len(doc))):
+        page_lines = extract_page_data(doc[i], i, cfg)
+        for j, ld in enumerate(page_lines):
+            next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
+            prev_ld = page_lines[j - 1] if j > 0 else None
+            if is_biography_start(ld, cfg, next_ld, prev_ld):
+                name = ld['full_text'].strip().lstrip('*').strip()
+                for ch in name:
+                    if ch.isalpha():
+                        return ch.upper()
+    return None
+
+
 def detect_boundaries(doc, cfg: ExtractionConfig):
-    """Resolve the first and last biography pages.
-
-    Uses section letter markers (large centered uppercase letters like 'A', 'B')
-    to find where biographies begin, with a fallback to counting biography starts.
-    End detection scans backward for ERRATA/TABLE DES/INDEX keywords.
-
-    Returns (start_page, end_page, volume_letters) where volume_letters is a set
-    of uppercase letters expected in this volume (e.g. {'A', 'B'}), or None.
-    """
     if not cfg.needs_auto_detect:
         return cfg.start_page, cfg.end_page, None
 
-    logger.info("Détection automatique des limites...")
+    logger.info("Auto-detecting boundaries...")
 
-    section_letters = scan_section_letters(doc, cfg)
-    if section_letters:
-        logger.info("Marqueurs de section trouvés: %s",
-                     ', '.join(f"'{l}' (p.{p+1})" for p, l in section_letters))
-    volume_letters = get_volume_letter_range(section_letters)
+    fm_end = _find_front_matter_end(doc, cfg)
+
+    suite_letter = None
+    if fm_end >= 0:
+        for i in range(fm_end, min(fm_end + 5, len(doc))):
+            suite_letter = _detect_suite_letter(doc[i])
+            if suite_letter:
+                logger.info("Suite volume: starts with '%s' (p.%d)", suite_letter, i + 1)
+                break
+
+    all_section_letters = scan_section_letters(doc, cfg)
+
+    suite_page = None
+    if suite_letter:
+        for i in range(max(0, fm_end), min(fm_end + 5, len(doc))):
+            if _detect_suite_letter(doc[i]):
+                suite_page = i
+                break
 
     start = cfg.start_page
     end = cfg.end_page
 
     if start is None:
-        start = find_biography_start_page(doc, cfg, section_letters)
-
+        start = find_biography_start_page(doc, cfg, all_section_letters, fm_end, suite_page)
     if end is None:
         end = find_biography_end_page(doc, cfg, start)
+
+    section_letters = [(p, l) for p, l in all_section_letters if start <= p < end]
+
+    if suite_letter:
+        if not section_letters or section_letters[0][1] != suite_letter:
+            section_letters = [(start, suite_letter)] + section_letters
+
+    if section_letters:
+        first_letter = section_letters[0][1]
+        table_des_start = None
+        for p, l in section_letters[1:]:
+            if l < first_letter:
+                table_des_start = p
+                logger.info("TABLE DES detected at page %d (marker '%s' < '%s')",
+                             p + 1, l, first_letter)
+                break
+        if table_des_start:
+            end = min(end, table_des_start)
+            section_letters = [(p, l) for p, l in section_letters if p < table_des_start]
+            logger.info("End adjusted to page %d (before TABLE DES)", end)
+
+    if section_letters:
+        logger.info("Section markers (in range): %s",
+                     ', '.join(f"'{l}' (p.{p+1})" for p, l in section_letters))
+
+    volume_letters = get_volume_letter_range(section_letters)
+
+    if not volume_letters:
+        first_letter = _infer_first_letter(doc, start, cfg)
+        if first_letter:
+            last_letter = first_letter
+            for i in range(end - 1, max(start, end - 10) - 1, -1):
+                page_text = doc[i].get_text('text').strip()
+                lines = page_text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line and line[0].isalpha() and line[0].isupper():
+                        candidate = line[0].upper()
+                        if candidate >= first_letter:
+                            last_letter = max(last_letter, candidate)
+                            break
+                if last_letter > first_letter:
+                    break
+            volume_letters = set(chr(c) for c in range(ord(first_letter), ord(last_letter) + 1))
+            logger.info("Inferred letter range: %s (from first bio)",
+                         ', '.join(sorted(volume_letters)))
+
+    if volume_letters:
+        logger.info("Expected letters: %s", ', '.join(sorted(volume_letters)))
 
     return start, end, volume_letters

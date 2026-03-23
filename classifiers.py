@@ -1,10 +1,3 @@
-"""Biography start detection, cross-reference and false-positive classification.
-
-Detection uses a validator chain: each validator returns True (match),
-False (definite non-match, stop chain), or None (inconclusive, try next).
-New detection rules can be added by appending to BIO_START_VALIDATORS.
-"""
-
 import re
 
 from config import ExtractionConfig
@@ -15,7 +8,6 @@ from constants import (
 
 
 def get_first_real_span(spans):
-    """Get the first non-empty, non-asterisk span."""
     for s in spans:
         text = s['text'].strip()
         if text and text != '*':
@@ -24,13 +16,11 @@ def get_first_real_span(spans):
 
 
 def is_indented_for_bio(x, cfg: ExtractionConfig):
-    """Check if x-position corresponds to biography start indentation."""
     lo, hi = cfg.left_col_indent if x < cfg.col_boundary else cfg.right_col_indent
     return lo <= x <= hi
 
 
 def has_name_pattern(text, cfg: ExtractionConfig):
-    """Check if text starts with an uppercase name followed by ( or , or 'ou'."""
     text = re.sub(r'^\*\s*', '', text).strip()
     if re.match(rf'^[{UC}][{UC}\s\-\'\.]+\s*(\(|,|ou\s)', text):
         name_part = re.split(r'[,(]', text)[0].strip()
@@ -42,10 +32,6 @@ def has_name_pattern(text, cfg: ExtractionConfig):
 
 
 def _check_bold_name(line_data, cfg, next_line_data, _prev_line_data):
-    """Validator 1: Bold uppercase name detection.
-
-    Returns True (is bio start), False (definitely not), or None (inconclusive).
-    """
     spans = line_data['spans']
     full = line_data['full_text']
     y = line_data['y']
@@ -103,7 +89,6 @@ def _check_bold_name(line_data, cfg, next_line_data, _prev_line_data):
 
 
 def _check_spaced_smallcaps(line_data, cfg, next_line_data, _prev_line_data):
-    """Validator 2: Spaced small-caps pattern (A B B E)."""
     first = get_first_real_span(line_data['spans'])
     if not first:
         return None
@@ -125,14 +110,12 @@ def _check_spaced_smallcaps(line_data, cfg, next_line_data, _prev_line_data):
 
 
 def _check_indented_name_pattern(line_data, cfg, _next_line_data, _prev_line_data):
-    """Validator 3: Indented line with uppercase name + comma/paren pattern."""
     if is_indented_for_bio(line_data['x'], cfg) and has_name_pattern(line_data['full_text'], cfg):
         return True
     return None
 
 
 def _check_indented_italic(line_data, cfg, _next_line_data, _prev_line_data):
-    """Validator 4: Indented UPPERCASE + italic prenom pattern."""
     spans = line_data['spans']
     x = line_data['x']
 
@@ -163,7 +146,6 @@ def _check_indented_italic(line_data, cfg, _next_line_data, _prev_line_data):
 
 
 def _check_name_alone(line_data, cfg, next_line_data, _prev_line_data):
-    """Validator 5: Name alone on a line, next line starts with ( or ,."""
     full = line_data['full_text']
     full_stripped = full.replace('*', '').strip()
     if not (re.match(rf'^[{UC}][{UC}\s\-\'\.]+$', full_stripped) and
@@ -181,7 +163,6 @@ def _check_name_alone(line_data, cfg, next_line_data, _prev_line_data):
 
 
 def _check_after_attribution(line_data, cfg, _next_line_data, prev_line_data):
-    """Validator 6: Name pattern preceded by author attribution."""
     full = line_data['full_text']
     if not (prev_line_data and has_name_pattern(full, cfg)):
         return None
@@ -218,13 +199,6 @@ BIO_START_VALIDATORS = [
 
 def is_biography_start(line_data, cfg: ExtractionConfig,
                        next_line_data=None, prev_line_data=None):
-    """Detect if a line is the start of a new biography entry.
-
-    Runs each validator in BIO_START_VALIDATORS in order:
-    - True  -> confirmed biography start
-    - False -> definitely not a biography start (stop chain)
-    - None  -> inconclusive, try next validator
-    """
     spans = line_data['spans']
     full = line_data['full_text']
 
@@ -242,7 +216,6 @@ def is_biography_start(line_data, cfg: ExtractionConfig,
 
 
 def is_name_continuation(prev_text, curr_text):
-    """Check if curr_text continues the name started in prev_text."""
     prev = prev_text.strip()
     last_word = prev.rstrip('.,;:').split()[-1] if prev.split() else ''
     if last_word.upper() in NAME_PARTICLES:
@@ -257,7 +230,6 @@ def is_name_continuation(prev_text, curr_text):
 
 
 def is_cross_reference(bio_text, cfg: ExtractionConfig):
-    """Check if entry is just a 'Voir X' redirect."""
     text = bio_text.strip()
     if len(text) < cfg.xref_max_chars and re.search(r'\bVoir\b', text):
         return True
@@ -265,14 +237,18 @@ def is_cross_reference(bio_text, cfg: ExtractionConfig):
         return True
     if len(text) < cfg.xref_garbled_max_chars and re.search(r'\bVO[A-Z]{3,}', text):
         return True
-    # OCR variants: A'oir, Voiràr, V oir, Voiràrarticle, etc.
     if len(text) < cfg.xref_max_chars and re.search(r"[AV]'?[oO]ir", text):
+        return True
+    if len(text) < cfg.xref_max_chars and re.search(
+            r'[—\-\.]\s*T\.\s*[IVXLCDMlvxicdm]+,?\s*col\.', text):
+        return True
+    if len(text) < cfg.xref_max_chars and re.search(
+            r'^[A-ZÀ-Þa-zà-ÿ\s\-\'\(\),]+\.\s*Col\.\s*\d+', text):
         return True
     return False
 
 
 def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
-    """Detect fragments, footnotes, and non-biography entries."""
     text = bio_text.strip()
     first_word = text.split()[0] if text.split() else ''
     first_word = re.sub(r'^\*\s*', '', first_word)
@@ -304,7 +280,6 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
         if set(re.findall(r'[A-Z]{2,}', sample)) & words['latin_indicators']:
             return True
 
-    # Latin inscriptions with date markers (Anno MDCXXIX, œtatis, etc.)
     if len(text) < cfg.xref_garbled_max_chars and re.search(
             r'\b(?:Anno|œtatis|ætatis|obiit|natus)\s+[MDCLXVI]+\b', text, re.IGNORECASE):
         return True
@@ -341,21 +316,47 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
     if re.match(r"^L'[a-z]", text):
         return True
 
-    # First word must look like a name (mostly uppercase, >= 3 chars)
+    title_match = re.match(
+        rf'^[{UC}]{{3,}},\s+[{UC}]{{3,}}(?:\s+(?:ET|OU|DE|DU|DES)\s+[{UC}]{{3,}})+',
+        text)
+    if title_match and '(' not in text[:title_match.end() + 20]:
+        return True
+
     if first_word_clean and len(first_word_clean) >= 2:
         upper_in_first = sum(1 for c in first_word_clean if c.isupper())
         if upper_in_first / len(first_word_clean) < 0.5:
             return True
 
-    # Garbled OCR: first word with 3+ consecutive identical characters
     if first_word_clean and re.search(r'(.)\1{2,}', first_word_clean):
         return True
 
-    # Engraving/printing attributions: "NAME sculp.", "NAME fecit", etc.
     if re.match(r'^[A-ZÀ-Þ]+\s+(?:sculp|fecit|excudit|del|inv|pinx)\b', text):
         return True
 
-    # Latin inscription fragments: name followed by many Latin words
+    if re.search(r'\b(?:sterf|stierf)\s+(?:den|de)\b', text[:200], re.IGNORECASE):
+        return True
+
+    if re.match(r'^[A-ZÀ-Þ]+,\s+OU\s+bien\b', text):
+        return True
+
+    if re.match(r'^[A-ZÀ-Þ]+\s+(?:defendet|delineavit|invenit|pinxit)\b', text):
+        return True
+
+    if re.match(r'^(?:EX|IN|AD|CUM|PRO|QUOD)\s+[A-Z]', text) and len(text) < cfg.xref_max_chars:
+        return True
+
+    if re.match(r'^M?D[CLXVI]+\.', text):
+        return True
+
+    if re.match(r"^D'[A-ZÀ-Þ]{3,}\s+[A-ZÀ-Þ]{3,}", text):
+        name_end = text.find(',')
+        if name_end > 0:
+            after = text[name_end + 1:name_end + 50].strip()
+            if after and after[0].islower():
+                first_w = re.match(r'[a-zà-ÿ]+', after)
+                if first_w and first_w.group(0) not in words['descriptors']:
+                    return True
+
     first_line = text.split('\n')[0] if '\n' in text else text[:200]
     first_line_words = re.findall(r'[A-ZÀ-Þa-zà-ÿ]{3,}', first_line)
     if len(first_line_words) >= 5:
@@ -364,11 +365,27 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
         if latin_count >= 3:
             return True
 
+    name_part = re.match(rf'^[{UC}][{UC}\s\-\'\.]+', text)
+    if name_part:
+        after_name = text[name_part.end():].strip()
+        if after_name.startswith(','):
+            after_comma = after_name[1:].strip()
+            first_w = re.match(r"[a-zà-ÿ']+", after_comma)
+            if first_w:
+                word = first_w.group(0).rstrip("'")
+                if (word not in words['descriptors'] and
+                        word not in NAME_LINKS and
+                        word not in FRENCH_STOP_WORDS and
+                        word not in {'né', 'née', 'mort', 'morte', 'dit',
+                                     'dite', 'surnommé', 'nommé', 'appelé',
+                                     'plus', 'aussi', 'dont'}):
+                    if '(' not in text[:100]:
+                        return True
+
     return False
 
 
 def split_merged_entries(bio_text, raw_lines, cfg: ExtractionConfig):
-    """Split a bio containing a cross-reference followed by another biography."""
     text = bio_text.strip()
 
     voir_match = re.search(

@@ -1,17 +1,8 @@
-"""ExtractionConfig dataclass."""
-
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 @dataclass
 class ExtractionConfig:
-    """All tunable parameters for biography extraction.
-
-    Layout parameters (header_y, col_boundary, indent ranges) are
-    auto-detected per volume. These defaults are fallbacks.
-    """
-
     pdf_path: str = ""
     output_dir: str = "biographies_finales"
 
@@ -21,6 +12,13 @@ class ExtractionConfig:
     end_section_keywords: list[str] = field(default_factory=lambda: [
         "ERRATA", "TABLE DES MATIÈRES", "TABLE ALPHABÉTIQUE",
         "TABLE DES", "INDEX",
+    ])
+
+    front_matter_keywords: list[str] = field(default_factory=lambda: [
+        "LISTE DES COLLABORATEURS", "LISTE DES MEMBRES",
+        "COMMISSION ACADÉMIQUE", "BIOGRAPHIE NATIONALE",
+        "PUBLIÉE PAR", "PUBLIEE PAR",
+        "L'ACADÉMIE ROYALE", "BEAUX-ARTS",
     ])
 
     min_bio_starts_for_page_detection: int = 3
@@ -43,7 +41,7 @@ class ExtractionConfig:
     min_uppercase_ratio: float = 0.5
     min_uppercase_count: int = 2
 
-    stub_merge_max_chars: int = 60
+    stub_merge_max_chars: int = 100
     min_entry_chars: int = 30
     short_entry_chars: int = 100
     alert_min_chars: int = 150
@@ -56,7 +54,7 @@ class ExtractionConfig:
     min_name_length: int = 3
     max_name_alone_length: int = 50
     max_name_chars: int = 80
-    max_filename_chars: int = 90
+    max_filename_chars: int = 70
     fallback_name_chars: int = 60
     header_lines_count: int = 5
 
@@ -82,5 +80,4 @@ class ExtractionConfig:
 
     @property
     def needs_auto_detect(self) -> bool:
-        """True if start or end page must be auto-detected."""
         return self.start_page is None or self.end_page is None
