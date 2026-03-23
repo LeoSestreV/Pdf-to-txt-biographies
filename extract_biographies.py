@@ -40,7 +40,8 @@ def collect_bio_starts(doc, cfg: ExtractionConfig, start_page: int, end_page: in
         if gidx == 0 or (
             not re.search(rf'[{UC}]{{2,}}-$',
                           all_lines[gidx - 1][2]['full_text'].rstrip()) and
-            not re.search(r'\bVoir\s*$', all_lines[gidx - 1][2]['full_text'].rstrip())
+            not re.search(r'\bVoir\s*$', all_lines[gidx - 1][2]['full_text'].rstrip()) and
+            not re.search(r'\w+-$', all_lines[gidx - 1][2]['full_text'].rstrip())
         )
     ]
 
