@@ -260,6 +260,34 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
     if text.startswith('D. O. M.') or text.startswith('ET DAME'):
         return True
 
+    # Filter internal title pages / front matter (e.g. "DES SCIENCES, DES LETTRES
+    # ET DES BEAUX-ARTS DE BELGIQUE", "DE LA BIOGRAPHIE NATIONALE (SUPPLÉMENT...)")
+    text_upper = text[:500].upper()
+    _TITLE_PAGE_MARKERS = (
+        'BEAUX-ARTS DE BELGIQUE',
+        'BIOGRAPHIE NATIONALE',
+        'ACADÉMIE ROYALE',
+        'ACADEMIE ROYALE',
+        "L'ACADÉMIE ROYALE",
+        'LISTE DES COLLABORATEURS',
+        'LISTE DES MEMBRES',
+        'COMMISSION ACADÉMIQUE',
+        'COMMISSION ACADEMIQUE',
+        'PUBLIÉE PAR',
+        'PUBLIEE PAR',
+        'EMILE BRUYLANT',
+        'ÉTABLISSEMENTS EMILE',
+        'ETABLISSEMENTS EMILE',
+    )
+    if any(marker in text_upper for marker in _TITLE_PAGE_MARKERS):
+        return True
+
+    # Filter "SUPPLÉMENT, VOLUMES..." index pages and "TOME N (FASCICULE N)" title pages
+    if re.match(r'^(?:SUPPLÉMENT|SUPPLEMENT)\s*,\s*VOLUME', text, re.IGNORECASE):
+        return True
+    if re.match(r'^TOME\s+[IVXLCDM\d]+\s*\(FASCICULE', text, re.IGNORECASE):
+        return True
+
     words_in_text = set(re.findall(r'[A-ZÀ-Þ]{3,}', text[:cfg.xref_garbled_max_chars]))
     if len(words_in_text) >= 2 and words_in_text <= words['latin_fragments']:
         return True
