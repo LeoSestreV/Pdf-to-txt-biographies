@@ -121,6 +121,29 @@ Additionally, if section markers regress alphabetically, the biography range is 
 ### Letter Range Filtering
 The volume's letter range is determined from section markers AND the actual last biography near the end of the volume. Entries whose first letter falls outside this range are rejected. Name particles (DE, VAN, DU, etc.) followed by an uppercase surname are never rejected by the standalone particle filter.
 
+## Results
+
+**5 132 biographies** extracted from **15 volumes** (letters A–N), each saved as an individual `.txt` file.
+
+| Volume | Letters | Biographies |
+|--------|---------|-------------|
+| Volume 1 | A–B | 456 |
+| Volume 2 | B | 453 |
+| Volume 3 | B–C | 235 |
+| Volume 4 | C–D | 426 |
+| Volume 5 | D | 419 |
+| Volume 6 | D–F | 383 |
+| Volume 7 | F–G | 409 |
+| Volume 8 | G–H | 332 |
+| Volume 9 | H | 324 |
+| Volume 10 | I–K | 236 |
+| Volume 11 | L | 337 |
+| Volume 12 | L (suite) | 214 |
+| Volume 13 | M | 271 |
+| Volume 14 | M (suite) | 262 |
+| Volume 15 | M–N | 375 |
+| **Total** | **A–N** | **5 132** |
+
 ## Configuration
 
 All thresholds are in `ExtractionConfig` (`config.py`). Layout parameters are auto-detected per volume.
