@@ -111,11 +111,15 @@ Volumes continuing from a previous one (e.g. "L (suite)") are automatically dete
 ### OCR Correction
 Section letter markers are verified against actual biography names on nearby pages. OCR confusions (C/G, B/Β) are automatically corrected.
 
-### TABLE DES Detection
-If section markers appear that are alphabetically before the volume's starting letter, they indicate a TABLE DES MATIÈRES section. The biography range is automatically truncated.
+### TABLE DES / TABLE ALPHABÉTIQUE Detection
+End-of-volume sections (TABLE ALPHABÉTIQUE DES NOTICES, ERRATA, TABLE DES MATIÈRES) are detected using two strategies:
+1. **Forward header scan**: pages from 50% onward are checked for standalone section headers (short lines matching known keywords)
+2. **Section letter regression**: if a section marker appears that is alphabetically before the volume's starting letter, it signals a TABLE section
+
+Additionally, if section markers regress alphabetically, the biography range is truncated before that point.
 
 ### Letter Range Filtering
-Extracted entries whose first letter falls outside the volume's expected range are rejected as false positives. This catches mid-biography splits caused by bold uppercase text within biography bodies.
+The volume's letter range is determined from section markers AND the actual last biography near the end of the volume. Entries whose first letter falls outside this range are rejected. Name particles (DE, VAN, DU, etc.) followed by an uppercase surname are never rejected by the standalone particle filter.
 
 ## Configuration
 

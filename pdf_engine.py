@@ -319,12 +319,40 @@ def find_biography_start_page(doc, cfg, section_letters=None, fm_end=-1, suite_p
     return 0
 
 
+def _is_end_section_header(page_text):
+    """Check if a page starts with a real end-section header (not in-text mention)."""
+    lines = [l.strip() for l in page_text.split('\n') if l.strip()]
+    # Skip column numbers (pure digits)
+    content_lines = [l for l in lines[:6] if not re.match(r'^\d+$', l)]
+    if not content_lines:
+        return False
+    for line in content_lines[:3]:
+        line_upper = line.upper()
+        # Must be a short standalone header line
+        if len(line) > 60:
+            continue
+        if re.match(r'^(TABLE ALPHAB|TABLE DES MATIÈRES|TABLE DES MATIERES|ERRATA)', line_upper):
+            return True
+    return False
+
+
 def find_biography_end_page(doc, cfg, start_page):
     total = len(doc)
+    end = total
+
+    # Strategy 1: scan forward from 50% for standalone TABLE/ERRATA headers
+    scan_from = max(start_page + 10, total // 2)
+    for i in range(scan_from, total):
+        text = doc[i].get_text('text')
+        if _is_end_section_header(text):
+            end = i
+            logger.info("End detected (header): page %d (PDF %d)", end, end + 1)
+            return end
+
+    # Strategy 2: backward scan in last N pages for keyword mentions
     keywords_upper = [kw.upper() for kw in cfg.end_section_keywords]
     search_start = max(start_page, total - cfg.end_section_search_pages)
     found_end = False
-    end = total
 
     for i in range(total - 1, search_start, -1):
         text = doc[i].get_text("text").upper()
@@ -339,6 +367,25 @@ def find_biography_end_page(doc, cfg, start_page):
         logger.info("No end section found, using last page: %d", total)
 
     return end
+
+
+def _infer_last_letter(doc, end_page, cfg, first_letter):
+    """Find the starting letter of the last biography near end_page."""
+    from classifiers import is_biography_start
+    for i in range(end_page - 1, max(0, end_page - 10) - 1, -1):
+        page_lines = extract_page_data(doc[i], i, cfg)
+        for j in range(len(page_lines) - 1, -1, -1):
+            ld = page_lines[j]
+            next_ld = page_lines[j + 1] if j + 1 < len(page_lines) else None
+            prev_ld = page_lines[j - 1] if j > 0 else None
+            if is_biography_start(ld, cfg, next_ld, prev_ld):
+                name = ld['full_text'].strip().lstrip('*').strip()
+                for ch in name:
+                    if ch.isalpha():
+                        letter = ch.upper()
+                        if 'A' <= letter <= 'Z' and letter >= first_letter:
+                            return letter
+    return None
 
 
 def _infer_first_letter(doc, start_page, cfg):
@@ -417,25 +464,21 @@ def detect_boundaries(doc, cfg: ExtractionConfig):
 
     volume_letters = get_volume_letter_range(section_letters)
 
-    if not volume_letters:
-        first_letter = _infer_first_letter(doc, start, cfg)
-        if first_letter:
-            last_letter = first_letter
-            for i in range(end - 1, max(start, end - 10) - 1, -1):
-                page_text = doc[i].get_text('text').strip()
-                lines = page_text.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line and line[0].isalpha() and line[0].isupper():
-                        candidate = line[0].upper()
-                        if candidate >= first_letter:
-                            last_letter = max(last_letter, candidate)
-                            break
-                if last_letter > first_letter:
-                    break
-            volume_letters = set(chr(c) for c in range(ord(first_letter), ord(last_letter) + 1))
-            logger.info("Inferred letter range: %s (from first bio)",
-                         ', '.join(sorted(volume_letters)))
+    first_letter = _infer_first_letter(doc, start, cfg)
+    if not first_letter and volume_letters:
+        first_letter = min(volume_letters)
+
+    if first_letter:
+        last_letter = max(volume_letters) if volume_letters else first_letter
+        # Extend range by finding the last biography's starting letter
+        last_bio_letter = _infer_last_letter(doc, end, cfg, first_letter)
+        if last_bio_letter and last_bio_letter > last_letter:
+            last_letter = last_bio_letter
+        volume_letters = set(chr(c) for c in range(ord(first_letter), ord(last_letter) + 1))
+        if not volume_letters:
+            volume_letters = None
+        logger.info("Letter range: %s",
+                     ', '.join(sorted(volume_letters)) if volume_letters else "none")
 
     if volume_letters:
         logger.info("Expected letters: %s", ', '.join(sorted(volume_letters)))

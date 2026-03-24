@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble du projet
 
-Ce projet est un pipeline automatisé d'extraction de biographies individuelles à partir des volumes numérisés (PDF) de la *Biographie Nationale de Belgique*. Chaque volume contient des centaines d'entrées biographiques disposées en deux colonnes. Le résultat final : **4 328 biographies** extraites de **15 volumes PDF**, chacune sauvegardée dans un fichier `.txt` individuel.
+Ce projet est un pipeline automatisé d'extraction de biographies individuelles à partir des volumes numérisés (PDF) de la *Biographie Nationale de Belgique*. Chaque volume contient des centaines d'entrées biographiques disposées en deux colonnes. Le résultat final : **5 132 biographies** extraites de **15 volumes PDF**, chacune sauvegardée dans un fichier `.txt` individuel.
 
 ---
 
@@ -170,6 +170,36 @@ Le script monolithique est décomposé en **6 modules** :
 
 ---
 
+### Phase 9 — Corrections majeures : particules, détection de fin, plage de lettres (24 mars 2026)
+
+**Problèmes identifiés :**
+
+1. **Filtre STANDALONE_PARTICLES trop agressif** : Le filtre `is_false_positive` rejetait toute biographie dont le premier mot était une particule (DE, VAN, DU, LE, LA...). Cela éliminait massivement les biographies commençant par ces particules — particulièrement dans le Volume 5 (lettre D : toutes les entrées "DE ...") et le Volume 7. **Correction** : la règle ne rejette désormais que les particules isolées non suivies d'un nom propre en majuscules.
+
+2. **Détection de la fin de volume (TABLE ALPHABÉTIQUE)** : La recherche arrière (`find_biography_end_page`) était limitée aux 30 dernières pages (`end_section_search_pages`), mais certains volumes ont une TABLE ALPHABÉTIQUE DES NOTICES qui commence bien plus tôt (ex. Volume 12 : page 329 sur 421). **Correction** : ajout d'une recherche avant (`_is_end_section_header`) qui scanne les pages depuis 50% du document à la recherche d'en-têtes de section autonomes (lignes courtes correspondant aux mots-clés).
+
+3. **Plage de lettres trop restrictive** : La plage de lettres du volume était déduite uniquement des marqueurs de section (lettres centrées). Si un seul marqueur existait (ex. "F" pour le Volume 7), la plage n'incluait que "F", alors que le volume couvrait aussi "G". **Correction** : ajout de `_infer_last_letter()` qui cherche la dernière biographie réelle près de la fin du volume pour étendre la plage.
+
+**Impact quantitatif :**
+
+| Volume | Avant | Après | Gain |
+|--------|-------|-------|------|
+| Volume 4 | 348 | 426 | +78 |
+| Volume 5 | 134 | 419 | +285 |
+| Volume 6 | 280 | 383 | +103 |
+| Volume 7 | 180 | 409 | +229 |
+| Volume 11 | 243 | 337 | +94 |
+| Volume 12 | 200 | 214 | +14 |
+| **Total** | **4 328** | **5 132** | **+804** |
+
+**Validation :**
+- 0 entrée TABLE ALPHABÉTIQUE dans la sortie
+- 0 fichier de moins de 50 caractères
+- 0 fichier commençant par une minuscule
+- Couverture alphabétique cohérente par volume
+
+---
+
 ## Architecture technique
 
 ### Pipeline d'extraction
@@ -221,24 +251,24 @@ La fonction `auto_detect_layout()` dans `pdf_engine.py` :
 
 ## Statistiques finales
 
-| Volume | Biographies extraites |
-|--------|----------------------|
-| Volume 1 | 456 |
-| Volume 2 | 453 |
-| Volume 3 | 235 |
-| Volume 4 | 348 |
-| Volume 5 | 134 |
-| Volume 6 | 280 |
-| Volume 7 | 180 |
-| Volume 8 | 332 |
-| Volume 9 | 323 |
-| Volume 10 | 236 |
-| Volume 11 | 243 |
-| Volume 12 | 200 |
-| Volume 13 | 271 |
-| Volume 14 | 262 |
-| Volume 15 | 375 |
-| **Total** | **4 328** |
+| Volume | Lettres | Biographies extraites |
+|--------|---------|----------------------|
+| Volume 1 | A–B | 456 |
+| Volume 2 | B | 453 |
+| Volume 3 | B–C | 235 |
+| Volume 4 | C–D | 426 |
+| Volume 5 | D | 419 |
+| Volume 6 | D–F | 383 |
+| Volume 7 | F–G | 409 |
+| Volume 8 | G–H | 332 |
+| Volume 9 | H | 324 |
+| Volume 10 | I–K | 236 |
+| Volume 11 | L | 337 |
+| Volume 12 | L (suite) | 214 |
+| Volume 13 | M | 271 |
+| Volume 14 | M (suite) | 262 |
+| Volume 15 | M–N | 375 |
+| **Total** | **A–N** | **5 132** |
 
 ---
 

@@ -281,11 +281,14 @@ def is_false_positive(bio_text, cfg: ExtractionConfig, words: dict):
             return True
 
     if len(text) < cfg.xref_garbled_max_chars and re.search(
-            r'\b(?:Anno|œtatis|ætatis|obiit|natus)\s+[MDCLXVI]+\b', text, re.IGNORECASE):
+            r'(?:Anno|œtatis|ætatis|obiit|natus|O\s*B\s*I\s*I\s*T)\s+[MDCLXVI.\s]+\b',
+            text, re.IGNORECASE):
         return True
 
     if first_word_clean in STANDALONE_PARTICLES:
-        return True
+        words_list = text.split()
+        if len(words_list) < 2 or not re.match(rf'^[{UC}]', words_list[1]):
+            return True
     if first_word_clean == 'ou' or first_word == 'ou':
         return True
     if re.match(r'^[A-Z]\.[A-Z]\.', text):
