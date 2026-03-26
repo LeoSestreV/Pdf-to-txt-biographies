@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble du projet
 
-Ce projet est un pipeline automatisé d'extraction de biographies individuelles à partir des volumes numérisés (PDF) de la *Biographie Nationale de Belgique*. Chaque volume contient des centaines d'entrées biographiques disposées en deux colonnes. Le résultat final : **5 132 biographies** extraites de **15 volumes PDF**, chacune sauvegardée dans un fichier `.txt` individuel.
+Ce projet est un pipeline automatisé d'extraction de biographies individuelles à partir des volumes numérisés (PDF) de la *Biographie Nationale de Belgique*. Chaque volume contient des centaines d'entrées biographiques disposées en deux colonnes. Le résultat final : **11 781 biographies** extraites de **42 volumes PDF**, chacune sauvegardée dans un fichier `.txt` individuel.
 
 ---
 
@@ -160,7 +160,7 @@ Le script monolithique est décomposé en **6 modules** :
 
 **Commits :**
 - `e34ce88` — Upload de toutes les biographies extraites
-- `5cb1e98` — Amélioration de la qualité d'extraction sur les 15 volumes
+- `5cb1e98` — Amélioration de la qualité d'extraction sur les 42 volumes
 - `4a2b7da` — Correction du filtre de césure pour les coupures mixtes (ex. Pays-BAS)
 
 **Améliorations finales :**
@@ -251,24 +251,65 @@ La fonction `auto_detect_layout()` dans `pdf_engine.py` :
 
 ## Statistiques finales
 
+### Volumes principaux (1–27)
+
 | Volume | Lettres | Biographies extraites |
 |--------|---------|----------------------|
-| Volume 1 | A–B | 456 |
-| Volume 2 | B | 453 |
-| Volume 3 | B–C | 235 |
-| Volume 4 | C–D | 426 |
-| Volume 5 | D | 419 |
-| Volume 6 | D–F | 383 |
-| Volume 7 | F–G | 409 |
-| Volume 8 | G–H | 332 |
-| Volume 9 | H | 324 |
-| Volume 10 | I–K | 236 |
-| Volume 11 | L | 337 |
+| Volume 1 | A–B | 452 |
+| Volume 2 | B | 452 |
+| Volume 3 | B–C | 233 |
+| Volume 4 | C–D | 425 |
+| Volume 5 | D | 416 |
+| Volume 6 | D–F | 379 |
+| Volume 7 | F–G | 403 |
+| Volume 8 | G–H | 328 |
+| Volume 9 | H–I | 321 |
+| Volume 10 | I–K | 234 |
+| Volume 11 | L | 336 |
 | Volume 12 | L (suite) | 214 |
 | Volume 13 | M | 271 |
-| Volume 14 | M (suite) | 262 |
-| Volume 15 | M–N | 375 |
-| **Total** | **A–N** | **5 132** |
+| Volume 14 | M (suite) | 256 |
+| Volume 15 | M–N | 373 |
+| Volume 16 | N–P | 403 |
+| Volume 17 | P | 319 |
+| Volume 18 | P–R | 343 |
+| Volume 19 | R | 319 |
+| Volume 20 | R | 226 |
+| Volume 21 | S | 263 |
+| Volume 22 | S | 269 |
+| Volume 23 | S | 302 |
+| Volume 24 | S–T | 372 |
+| Volume 25 | T–U | 391 |
+| Volume 26 | V | 415 |
+| Volume 27 | W | 139 |
+| **Sous-total** | **A–W** | **8 879** |
+
+### Volumes supplémentaires (29–44)
+
+| Volume | Lettres | Biographies extraites |
+|--------|---------|----------------------|
+| Volume 29 | A–Z | 310 |
+| Volume 30 | A–W | 510 |
+| Volume 31 | A–Y | 521 |
+| Volume 32 | A–V | 163 |
+| Volume 33 | A–Y | 200 |
+| Volume 34 | A–V | 147 |
+| Volume 35 | A–W | 154 |
+| Volume 37 | B–W | 158 |
+| Volume 38 | A–W | 132 |
+| Volume 39 | A–W | 96 |
+| Volume 40 | B–V | 124 |
+| Volume 41 | A–W | 107 |
+| Volume 42 | B–W | 107 |
+| Volume 43 | A–W | 114 |
+| Volume 44 | A–Z | 84 |
+| **Sous-total** | **A–Z** | **2 927** |
+
+### Total
+
+| | | |
+|--------|---------|----------------------|
+| **42 volumes** | **A–Z** | **11 781** |
 
 ---
 
